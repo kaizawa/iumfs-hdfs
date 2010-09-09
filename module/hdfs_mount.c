@@ -1,9 +1,13 @@
 /*****************************************************************
  * hdfs_mount.c
  *
- * $Date: 2010/09/07 15:18:07 $, $Revision: 1.1.2.9 $                           
- * 
- *  gcc hdfs_mount.c -o mount
+ * Copright (c) 2010  Kazuyoshi Aizawa <admin2@whiteboard.ne.jp>
+ *
+ * mount(1) command for IUMFS filesystem
+ *
+ ****************************************************************/
+/*
+ * gcc hdfs_mount.c -o mount
  *
  * hdfs の為の mount コマンド。
  * /usr/lib/fs/hdfs/ ディレクトリを作り、このディレクトリ内に
@@ -13,7 +17,7 @@
  *
  *   Usage: mount -F hdfs hdfs_base_path mount_point
  *
- ******************************************************************/
+ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
