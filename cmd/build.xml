@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<project name="applet" default="dist" basedir=".">
+  <property name="src" value="./src"/>
+  <property name="build" value="./build"/>
+  <property name="dist" value="./"/>
+  <property environment="env" />
+  <path id="class.path">
+      <fileset dir="${env.HADOOP_HOME}">
+         <include name="*.jar" />
+      </fileset>  
+  </path>
+  <target name="dist" depends="compile">
+    <jar manifest="manifest" jarfile="${dist}/hdfsd.jar" basedir="${build}" >
+      <include name="**/*.class"/>
+      <include name="**/log.properties"/>
+    </jar>
+  </target>
+  <target name="compile">
+    <javac srcdir="${src}" destdir="${build}" debug="true" debuglevel="lines,vars,source" classpathref="class.path" encoding="utf8">
+    </javac>
+  </target>
+</project>
+

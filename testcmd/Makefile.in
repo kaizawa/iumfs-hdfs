@@ -1,0 +1,29 @@
+CONFIGURE_FILES = Makefile config.status config.cache config.h config.log
+
+CC = @CC@
+LD = ld
+RM = rm
+
+DEFS = @DEFS@
+CFLAGS = $(DEFS) @CFLAGS@  -I ../module
+
+PRODUCTS = fstestd fstest
+
+INSTALL = @INSTALL@
+
+all: $(PRODUCTS)
+
+fstestd : fstestd.c ../module/iumfs.h
+	-$(CC) $(CFLAGS) fstestd.c -lsocket -lnsl -o $@
+
+fstest : fstest.c ../module/iumfs.h
+	-$(CC) $(CFLAGS) fstest.c -o $@
+
+clean:
+	-$(RM) -f $(PRODUCTS) 
+
+distclean:
+	-$(RM) -f $(CONFIGURE_FILES)
+
+test:
+	./test.sh nobuild

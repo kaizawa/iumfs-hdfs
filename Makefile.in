@@ -1,0 +1,48 @@
+CONFIGURE_FILES = Makefile config.status config.cache config.h config.log autom4te.cache
+
+CC = @CC@
+LD = ld
+RM = rm
+
+DEFS = @DEFS@
+CFLAGS = $(DEFS) @CFLAGS@ 
+KCFLAGS = $(DEFS) @KCFLAGS@
+LD_FLAGS = @LD_OPT@
+
+ADD_DRV = /usr/sbin/add_drv
+REM_DRV = /usr/sbin/rem_drv
+MOD_UNLOAD = /usr/sbin/modunload
+MOD_LOAD = /usr/sbin/modload
+LN = /usr/bin/ln
+DRV_DIR = @DRV_DIR@
+DRV_CONF_DIR = /usr/kernel/drv
+FS_DIR = @FS_DIR@
+CHMOD = /bin/chmod
+DEVFSADM = /usr/sbin/devfsadm
+
+INSTALL = @INSTALL@
+
+all:
+	cd module ; make 
+	cd testcmd ; make 
+
+install:
+	cd module ; make install
+
+uninstall:
+	cd module ; make uninstall
+
+reinstall: uninstall install
+
+clean:
+	cd module ; make clean
+	cd testcmd ; make clean
+
+distclean:
+	cd module ; make distclean
+	cd testcmd ; make distclean
+	-$(RM) -rf $(CONFIGURE_FILES)
+
+test:
+	cd testcmd ; make test 
+

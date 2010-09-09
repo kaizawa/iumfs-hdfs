@@ -1,0 +1,10 @@
+# iumfs_devlink.tab
+#
+# $Date: 2006/03/26 06:39:26 $, $Revision: 1.2 $
+#
+# iumfs の為の devlink.tab ファイル。
+# Makefile の中で devfsadm -t <table> の引数に使われ、/devices/pseudo/iumfs@0:iumfscntl
+# のシンボリックリンク /dev/iumfscntl を作成する。
+# （注）コメント行以外の中にスペース文字を含んではならない。（タブを使用！！）
+#
+name=iumfs;minor=iumfscntl	\M0
