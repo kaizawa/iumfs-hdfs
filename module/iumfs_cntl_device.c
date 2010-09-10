@@ -112,7 +112,7 @@ static struct dev_ops iumfscntl_ops = {
  */
 struct modldrv iumfs_modldrv = {
     &mod_driverops, //  mod_driverops
-    "IUMFS control device", // ドライバの説明
+    PACKAGE_NAME " driver ver " PACKAGE_VERSION, // ドライバの説明
     &iumfscntl_ops // driver ops
 };
 

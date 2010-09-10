@@ -176,7 +176,7 @@ static struct vfssw iumfs_vfssw = {
  */
 static struct modlfs iumfs_modlfs = {
     &mod_fsops, // fsmodops
-    "pseudo file system", // fs_linkinfo
+    PACKAGE_NAME " filesystem ver " PACKAGE_VERSION, // fs_linkinfo
 #ifdef SOL10
     &iumfs_vfsdef // fs_vfsdef
 #else    
@@ -207,6 +207,8 @@ int
 _init()
 {
     int err;
+    
+    cmn_err(CE_CONT, "%s Filesystem Ver %s \n", PACKAGE_NAME, PACKAGE_VERSION);        
 
     /*
      * デバイス管理構造体の管理用の iumfscntl_soft_root を初期化
@@ -226,7 +228,7 @@ _init()
      * グローバルロックを初期化
      */
     mutex_init(&iumfs_global_lock, NULL, MUTEX_DEFAULT, NULL);
-
+    
     return (err);
 }
 
