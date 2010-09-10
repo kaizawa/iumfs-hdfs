@@ -1208,6 +1208,9 @@ iumfs_getapage(vnode_t *vp, u_offset_t off, size_t len, uint_t *protp,
         bp_mapout(bp);
         pageio_done(bp);
 
+        if (err)
+            break;
+
         /*
          *  ページリストの配列(plarr)を初期化する
          */
