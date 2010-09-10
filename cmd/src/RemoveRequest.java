@@ -23,7 +23,7 @@ class RemoveRequest extends Request {
         FileSystem hdfs = getFileSystem();
         try {
             if (hdfs.delete(getFullPath(), true) == false) {
-                logger.info("cannot remove " + getFullPath());
+                logger.fine("cannot remove " + getFullPath());
                 setResponseHeader(EIO, 0);
                 return;
             }
@@ -32,7 +32,7 @@ class RemoveRequest extends Request {
              */
             setResponseHeader(SUCCESS, 0);
         } catch (IOException ex) {
-            logger.info("IOException happend when removing " + getFullPath());
+            logger.fine("IOException happend when removing " + getFullPath());
             ex.printStackTrace();
             setResponseHeader(EIO, 0);
         }

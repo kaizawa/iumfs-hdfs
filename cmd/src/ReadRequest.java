@@ -27,14 +27,14 @@ public class ReadRequest extends Request {
              */
             int ret = fsdis.read(getOffset(), wbbuf.array(), Request.RESPONSE_HEADER_SIZE, (int) getSize());
             fsdis.close();
-            logger.info("read offset=" + getOffset() + ",size=" + getSize());
+            logger.fine("read offset=" + getOffset() + ",size=" + getSize());
             /*
              * レスポンスヘッダをセット
              */
             setResponseHeader(SUCCESS, ret);
 
         } catch (IOException ex) {
-            logger.info("IOException happend when reading hdfs. offset=" + getOffset() + ",size=" + getSize());
+            logger.fine("IOException happend when reading hdfs. offset=" + getOffset() + ",size=" + getSize());
             ex.printStackTrace();
             setResponseHeader(ENOENT, 0);
         }

@@ -60,10 +60,9 @@ public class WriteRequest extends Request {
 
         } catch (FileNotFoundException ex){
             logger.finer("FileNotFoundException happend when writing");
-            ex.printStackTrace();
             setResponseHeader(ENOENT, 0);            
         } catch (IOException ex) {
-            logger.info("IOException happend when writing");
+            logger.fine("IOException happend when writing");
             ex.printStackTrace();
             setResponseHeader(ENOTSUP, 0);
         }

@@ -24,13 +24,13 @@ class MkdirRequest extends Request{
         FileSystem hdfs = getFileSystem();
         try {
             if(hdfs.exists(getFullPath()) == true){
-                logger.info("cannot create directory");
+                logger.fine("cannot create directory");
                 setResponseHeader(EEXIST, 0);
                 return;
             }
             
             if (hdfs.mkdirs(getFullPath()) == false){
-                logger.info("cannot create directory");
+                logger.fine("cannot create directory");
                 setResponseHeader(EIO, 0);
                 return;
             }
@@ -39,7 +39,7 @@ class MkdirRequest extends Request{
              */
             setResponseHeader(SUCCESS, 0);
         } catch (IOException ex) {
-            logger.info("IOException happend when removing directory");
+            logger.fine("IOException happend when removing directory");
             ex.printStackTrace();
             setResponseHeader(EIO, 0);
         }

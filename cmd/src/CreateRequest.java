@@ -28,7 +28,7 @@ class CreateRequest extends Request {
         try {
             //ファイルが存在したら EEXIST を返す
             if(hdfs.exists(getFullPath()) == true){
-                logger.info("cannot create file");
+                logger.fine("cannot create file");
                 setResponseHeader(EEXIST, 0);
                 return;
             }
@@ -40,11 +40,10 @@ class CreateRequest extends Request {
             fsdos.close();
             setResponseHeader(SUCCESS, 0);
         } catch (AlreadyBeingCreatedException ex) {
-            logger.info("AlreadyBeingCreatedException when writing");
-            ex.printStackTrace();
+            logger.fine("AlreadyBeingCreatedException when writing");
             setResponseHeader(EEXIST, 0);
         } catch (IOException ex) {
-            logger.info("IOException happend when writing");
+            logger.fine("IOException happend when writing");
             ex.printStackTrace();
             setResponseHeader(ENOTSUP, 0);
         }

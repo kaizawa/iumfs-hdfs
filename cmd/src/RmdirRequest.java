@@ -20,7 +20,7 @@ class RmdirRequest extends Request {
         FileSystem hdfs = getFileSystem();
         try {
             if (hdfs.delete(getFullPath(), true) == false) {
-                logger.info("cannot remove directory " + getFullPath());
+                logger.fine("cannot remove directory " + getFullPath());
                 setResponseHeader(EIO, 0);
                 return;
             }
@@ -29,7 +29,7 @@ class RmdirRequest extends Request {
              */
             setResponseHeader(SUCCESS, 0);
         } catch (IOException ex) {
-            logger.info("IOException happend when removing directory " + getFullPath());
+            logger.fine("IOException happend when removing directory " + getFullPath());
             ex.printStackTrace();
             setResponseHeader(EIO, 0);
         }
