@@ -1,39 +1,6 @@
-Please note, comments on each source code are written in Japanese now.
+Please note, comments on each source code are written in Japanese(UTF-8) now .
 
-This program is not tested well. It might cause system panic/hang.
-
+This program is not tested well. It might cause system panic or hang.
 DON'T install this on production system. Use this at your own risk.
 
-Pre-Requirement
----------------
- o JDK6
- o Hadoop 0.21.0 (previous version seems not fully supporting Filesystem.append)
- o gcc, ant, make ...
-
-How To Compile and Install filesystem module
-============================================
- 1. Compile filesystem module and driver
-    % ./configure
-    % make
-    :
- 2. Run make install as root use
-    # make install
-    :
-
-How To Compile Java user mode daemon
-===========================================
- 1. Compile user mode daemon using ant
-    % cd cmd
-    % ant
-    :
-
-How To Use
-===========================================
- 1. Mount hdfs filesytem using mount(1M) command
-   # /sbin/mount -F hdfs hdfs_dir mount_point
-   
-     where <hdfs dir> is a directory path name on HDFS (e.g. /users/kaizawa)
-     where <mount point> is a directory path name to be mounted.
-
-2. Run hdfsd user mode daemon which will communicate with remote hdfs nodes
-   % hadoop -cp ./hdfsd.jar:${HADOOP_HOME}/conf:${HADOOP_HOME}/hadoop-common-0.21.0.jar:${HADOOP_HOME}/hadoop-hdfs-0.21.0.jar:${HADOOP_HOME}/lib/commons-logging-1.1.1.jar hdfsd
+See http://github.com/kaizawa/hdfs/wiki for more detail.
