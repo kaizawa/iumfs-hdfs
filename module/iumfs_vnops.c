@@ -262,12 +262,16 @@ struct vnodeops iumfs_vnodeops = {
  * iumfs_open()  VNODE オペレーション
  *
  * open(2) システムコールに対応。
- * ここではほとんど何もしない。
+ *
+ * 戻り値
+ *    正常時   : 0
+ *    エラー時 : errno * 
  *************************************************************************/
 static int
-iumfs_open(vnode_t **vpp, int flag, struct cred *cr)
+iumfs_open(vnode_t **vpp, int ioflag, struct cred *cr)
 {
     vnode_t *vp;
+    int err = 0;
 
     DEBUG_PRINT((CE_CONT, "iumfs_open is called\n"));
     DEBUG_PRINT((CE_CONT, "iumfs_open: vpp = 0x%p, vp = 0x%p\n", vpp, *vpp));
@@ -276,11 +280,22 @@ iumfs_open(vnode_t **vpp, int flag, struct cred *cr)
 
     if (vp == NULL) {
         DEBUG_PRINT((CE_CONT, "iumfs_open: vnode is null\n"));
-        DEBUG_PRINT((CE_CONT, "iumfs_open: return(EINVAL)\n"));
-        return (EINVAL);
+        err = EINVAL;
+        goto out;
     }
-    DEBUG_PRINT((CE_CONT, "iumfs_open: return(SUCCESS)\n"));
-    return (SUCCESS);
+
+    /*
+     * ファイルへのアクセスの可否を検証する
+     */
+    if((err = iumfs_access(vp, VWRITE, ioflag, cr))){
+        DEBUG_PRINT((CE_CONT, "iumfs_open: file access denied.\n"));            
+        VN_RELE(vp);
+        goto out;
+    }
+
+  out:
+    DEBUG_PRINT((CE_CONT, "iumfs_open: return(%d)\n", err));
+    return (err);
 }
 
 /************************************************************************
@@ -558,15 +573,35 @@ iumfs_getattr(vnode_t *vp, vattr_t *vap, int flags, struct cred *cr)
 /************************************************************************
  * iumfs_access()  VNODE オペレーション
  *
- * 常に成功（アクセス可否を判定しない）
+ * vnode に対する mode, flags でのアクセスの可否を判定する。
+ * TODO: 現在アクセス判定のルールをこのルーチンの中に直接書いてしまってい
+ * るが、本来であれば iumfs_init 時に設定されたファイルシステムタイプ特有
+ * のルールを判定すべき。（汎用性という意味で）
+ *
+ * 戻り値
+ *    正常時   : 0
+ *    エラー時 : errno
  *************************************************************************/
 static int
-iumfs_access(vnode_t *vp, int mode, int flags, struct cred *cr)
+iumfs_access(vnode_t *vp, int mode, int ioflag, struct cred *cr)
 {
+    iumnode_t *inp = NULL;
+    int err = 0;
+    
     DEBUG_PRINT((CE_CONT, "iumfs_access is called\n"));
-    DEBUG_PRINT((CE_CONT, "iumfs_access: return(SUCCESS)\n"));
-    // 常に成功
-    return (SUCCESS);
+    inp = VNODE2IUMNODE(vp);
+
+    /*
+     * 既存データがある状態(fize!=0)で TRUNCATE は許可されない
+     * ファイルができて最初の書き込みであればいい。
+     */ 
+    if((inp->fsize != 0) && (mode & VWRITE) && (ioflag & FTRUNC)){
+        DEBUG_PRINT((CE_CONT, "iumfs_access: retuested to truncate file.\n"));
+        err = ENOTSUP;
+    }
+
+    DEBUG_PRINT((CE_CONT, "iumfs_access: return(%d)\n", err));
+return (err);
 }
 
 /************************************************************************
@@ -1390,6 +1425,15 @@ iumfs_write(vnode_t *vp, struct uio *uiop, int ioflag, struct cred *cr)
     }
 
     /*
+     * ファイルへのアクセスの可否を検証する
+     */
+    if((err = iumfs_access(vp, VWRITE, ioflag, cr))){
+        DEBUG_PRINT((CE_CONT, "iumfs_write: file access denied.\n"));            
+        VN_RELE(vp);
+        goto out;
+    }    
+
+    /*
      * O_APPEND フラグ付きで open(2) されている場合。
      * offset 値をファイルサイズまで調整。
      */ 
@@ -1642,13 +1686,28 @@ iumfs_create(vnode_t *dirvp, char *name, vattr_t *vap, vcexcl_t excl,
          */
         DEBUG_PRINT((CE_CONT, "iumfs_create: file already exists.\n"));
         inp = VNODE2IUMNODE(vp);
+
+        if (excl == EXCL) {
+            /*
+             * O_EXCL フラグつきで open された模様. EEXIT エラーを返す.
+             */
+            err = EEXIST;
+            goto out;
+        }
+        
+        if((err = iumfs_access(vp, mode, flag, cr))){
+            DEBUG_PRINT((CE_CONT, "iumfs_create: file access denied.\n"));            
+            VN_RELE(vp);
+            goto out;
+        }
+
         /*
          * もし va_mask の AT_SIZE フラグが立っており、va_size が 0 で
          * あった場合には、ファイルサイズを 0 にする。
          * open(2) に O_TRUNC フラグが渡されたら、この関数の flag には FTRUNC
          * フラグが立っていると思っていたが、違った。
-         * ファイルサイズを 0 にするかどうかを判断するには vattr の va_size を
-         * 見るのが正しいようだ。
+         * HDFS の場合には TRUNC はできないので iumfs_access で ENOTSUP が
+         * 返され、ここには到達しないはず。
          */
         if ((vap->va_mask & AT_SIZE) && (vap->va_size == 0)) {
             // ファイルの vnode の属性情報をセット            
@@ -1657,18 +1716,6 @@ iumfs_create(vnode_t *dirvp, char *name, vattr_t *vap, vcexcl_t excl,
             inp->vattr.va_nblocks = 0;
             inp->vattr.va_atime = iumfs_get_current_time();
             mutex_exit(&(inp->i_lock));
-        }        
-        if (excl == EXCL) {
-            /*
-             * O_EXCL フラグつきで open された模様. EEXIT エラーを返す.
-             */
-            err = EEXIST;
-            goto out;
-        }
-        if((err = iumfs_access(vp, mode, flag, cr))){
-            DEBUG_PRINT((CE_CONT, "iumfs_create: file access denied.\n"));            
-            VN_RELE(vp);
-            goto out;
         }
 
         // 引数として渡されたポインタに新しい vnode のアドレスをセット
