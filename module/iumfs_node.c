@@ -22,11 +22,13 @@
  * Copyright (c) 1986, 2010, Oracle and/or its affiliates. All rights reserved.
  */
 
+/*
+ * Copright (c) 2010  Kazuyoshi Aizawa <admin2@whiteboard.ne.jp>
+ * All rights reserved.
+ */   
 /**************************************************************
  * iumfs_vfs
  *
- * Copright (c) 2010  Kazuyoshi Aizawa <admin2@whiteboard.ne.jp>
- *  
  * node operations for IUMFS filesystem.
  *   
  **************************************************************/

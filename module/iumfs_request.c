@@ -22,10 +22,12 @@
  * Copyright (c) 1986, 2010, Oracle and/or its affiliates. All rights reserved.
  */
 
+/*
+ * Copright (c) 2010  Kazuyoshi Aizawa <admin2@whiteboard.ne.jp>
+ * All rights reserved.
+ */   
 /**************************************************************
  * iumfs_request
- *
- * Copright (c) 2010  Kazuyoshi Aizawa <admin2@whiteboard.ne.jp>
  *
  * Routines for IUMFS filesystem module to pass request
  * to intermidicate device driver.

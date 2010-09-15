@@ -22,10 +22,12 @@
  * Copyright (c) 1986, 2010, Oracle and/or its affiliates. All rights reserved.
  */
 
+/*
+ * Copright (c) 2010  Kazuyoshi Aizawa <admin2@whiteboard.ne.jp>
+ * All rights reserved.
+ */ 
 /**************************************************************
  * iumfs_cntl_device.c
- *
- * Copright (c) 2010  Kazuyoshi Aizawa <admin2@whiteboard.ne.jp>
  *  
  * Device driver to intermidicate between IUMFS filesystem
  * module and user mode daemon.
