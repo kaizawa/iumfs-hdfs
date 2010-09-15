@@ -3,4 +3,4 @@ Please note, comments on each source code are written in Japanese(UTF-8) now .
 This program is not tested well. It might cause system panic or hang.
 DON'T install this on production system. Use this at your own risk.
 
-See http://github.com/kaizawa/hdfs/wiki for more detail.
+See http://github.com/kaizawa/iumfs-hdfs/wiki for more detail.
