@@ -33,7 +33,6 @@
 # You will be prompted password for root user.
 #
 daemonpid=""
-
 mnt="/var/tmp/iumfsmnt"
 base="/var/tmp/iumfsbase"
 CLASSPATH="\
