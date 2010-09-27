@@ -71,10 +71,10 @@ init (){
 	# Just in case, remove existing test dir
 	rm -rf ${base}   >> $LOGFILE 2>&1
         hdfs dfs -rmr /var/tmp/iumfsbase  >> $LOGFILE 2>&1
-	if [ "$?" -ne "0" ]; then
-	    echo "Can't remove existing directory on HDFS. See $LOGFILE" 
-	    fini 1	
-	fi
+#	if [ "$?" -ne "0" ]; then
+#	    echo "Can't remove existing directory on HDFS. See $LOGFILE" 
+#	    fini 1	
+#	fi
 
         # Create mount point and base directory 
 	for dir in ${base} ${mnt}
