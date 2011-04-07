@@ -165,7 +165,10 @@ typedef struct iumfs_vattr
 #define MAX_MSG         256     // SYSLOG に出力するメッセージの最大文字数 
 #define MAXNAMLEN       255     // 最大ファイル名長
 #define BLOCKSIZE       512     // iumfs ファイルシステムのブロックサイズ
-#define NMINDEV	         10     // minor device の数の宣言 
+#define MAX_INST         10     // iumfscntl の最大インスタンス数
+
+#define MINOR2INST(minor) minor - 1
+#define INST2MINOR(instance) instance + 1
 
 #ifdef DEBUG
 #define  DEBUG_PRINT(args)  debug_print args

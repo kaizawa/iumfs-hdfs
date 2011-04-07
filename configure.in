@@ -1,4 +1,4 @@
-AC_INIT([IUMFS], [0.1], [admin2@whiteboard.ne.jp])
+AC_INIT([IUMFS], [0.1.1], [admin2@whiteboard.ne.jp])
 AC_PROG_CC
 AC_PROG_INSTALL
 

@@ -218,6 +218,7 @@ echo "## Start filesystem operation test with fstestd daemon."
 echo "##"
 do_mount
 start_fstestd
+sleep  3 
 exec_fstest "mkdir"
 exec_fstest "open"
 exec_fstest "write"
@@ -235,6 +236,7 @@ echo "## Start filesystem operation test with hdfsd daemon."
 echo "##"
 do_mount
 start_hdfsd
+sleep 3 
 exec_fstest "mkdir"
 exec_fstest "open"
 exec_fstest "write"

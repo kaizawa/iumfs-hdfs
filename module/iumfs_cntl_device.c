@@ -119,7 +119,7 @@ struct modldrv iumfs_modldrv = {
 };
 
 //static int iumfscntl_cnt = NMINDEV; // NMINDEV はマイナーデバイス数(=可能なオープン数)
-static iumfscntl_soft_t * cntlsoft_fanout[NMINDEV]; // iumfscntl_soft_t 構造体の配列
+static iumfscntl_soft_t * cntlsoft_fanout[MAX_INST]; // iumfscntl_soft_t 構造体の配列
 static dev_info_t *iumfscntl_dev_info;	/* private devinfo pointer */
 
 /*****************************************************************************
@@ -174,11 +174,8 @@ iumfscntl_detach(dev_info_t *dip, ddi_detach_cmd_t cmd)
         return (DDI_FAILURE);
     }
 
-//    instance = ddi_get_instance(dip);
-
     ddi_remove_minor_node(dip, NULL);
-
-
+    
     DEBUG_PRINT((CE_CONT, "iumfscntl_dettach: return(DDI_SUCCESS)\n"));
     return (DDI_SUCCESS);
 }
@@ -203,25 +200,26 @@ iumfscntl_open(dev_t *dev, int flag, int otyp, cred_t *cred)
         err = EINVAL;
         goto out;
     }
-    
-    for (newminor = 0 ; newminor < NMINDEV ; newminor++ ) {
-        if (cntlsoft_fanout[newminor] == NULL)
+
+    for (instance = 0 ; instance < MAX_INST ; instance++ ) {
+        if (cntlsoft_fanout[instance] == NULL)
             break;
     }
-    if(newminor >= NMINDEV){
+    
+    if(instance >= MAX_INST){
         err = ENXIO;        
         goto out;
     }
-    
-    *dev = makedevice(getmajor(*dev), newminor);
-    instance = newminor; // use new minor dev number as instance number.
-    DEBUG_PRINT((CE_CONT, "new instance = %d",newminor));
+    DEBUG_PRINT((CE_CONT, "iumfscntl_open: new instance = %d",instance));    
+
+    newminor = INST2MINOR(instance);
+     *dev = makedevice(getmajor(*dev), newminor);
 
     /*
      *　構造体を割り当てる
      */
     if (ddi_soft_state_zalloc(iumfscntl_soft_root, instance) != DDI_SUCCESS) {
-        cmn_err(CE_CONT, "iumfscntl_open: failed to create minor node\n");
+        cmn_err(CE_CONT, "iumfscntl_open: failed to alloc soft state structure\n");
         err = DDI_FAILURE;
         goto out;
     }
@@ -282,8 +280,7 @@ iumfscntl_close(dev_t dev, int flag, int otyp, cred_t *cred)
         goto out;
     }
 
-    instance = getminor(dev);
-
+    instance = MINOR2INST(getminor(dev)); // get instance number from minor
     cntlsoft = ddi_get_soft_state(iumfscntl_soft_root, instance);
      if (cntlsoft == NULL) {
          err = ENXIO;
@@ -332,7 +329,7 @@ iumfscntl_read(dev_t dev, struct uio *uiop, cred_t *credp)
 
     DEBUG_PRINT((CE_CONT, "iumfscntl_read called\n"));
 
-    instance = getminor(dev);
+    instance = MINOR2INST(getminor(dev)); // get instance number from minor
     cntlsoft = ddi_get_soft_state(iumfscntl_soft_root, instance);
     if (cntlsoft == NULL) {
         err = ENXIO;
@@ -407,7 +404,7 @@ iumfscntl_write(dev_t dev, struct uio *uiop, cred_t *credp)
 
     DEBUG_PRINT((CE_CONT, "iumfscntl_write called\n"));
 
-    instance = getminor(dev);
+    instance = MINOR2INST(getminor(dev)); // get instance number from minor    
     cntlsoft = ddi_get_soft_state(iumfscntl_soft_root, instance);
     if (cntlsoft == NULL) {
         cmn_err(CE_CONT, "iumfscntl_write: can't get soft state structure.\n");
@@ -482,9 +479,8 @@ iumfscntl_devmap(dev_t dev, devmap_cookie_t handle, offset_t off, size_t len, si
 
     DEBUG_PRINT((CE_CONT, "iumfscntl_devmap called\n"));
 
-    instance = getminor(dev);
-
-    cntlsoft = ddi_get_soft_state(iumfscntl_soft_root, getminor(dev));
+    instance = MINOR2INST(getminor(dev)); // get instance number from minor        
+    cntlsoft = ddi_get_soft_state(iumfscntl_soft_root, instance);
     if (cntlsoft == NULL) {
         cmn_err(CE_WARN, "iumfscntl_devmap: can't get soft state structure.\n");
         err = ENXIO;
@@ -528,7 +524,7 @@ iumfscntl_poll(dev_t dev, short events, int anyyet, short *reventsp, struct poll
 
     DEBUG_PRINT((CE_CONT, "iumfscntl_poll called\n"));
 
-    instance = getminor(dev);
+    instance = MINOR2INST(getminor(dev)); // get instance number from minor            
     cntlsoft = ddi_get_soft_state(iumfscntl_soft_root, instance);
     if (cntlsoft == NULL) {
         cmn_err(CE_WARN, "iumfscntl_poll: can't get soft state structure.\n");
