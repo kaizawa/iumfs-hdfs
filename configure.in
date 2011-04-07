@@ -24,8 +24,9 @@ if test "$GCC" = yes; then
 	CFLAGS="$CFLAGS -Wall"
 fi
 
-IS_OPENSOLARIS=`uname -v 2>&1 | grep  snv`
-if test -n "$IS_OPENSOLARIS"; then
+MAJOR_VERSION=`uname -r | cut -f 1 -d .`
+MINOR_VERSION=`uname -r | cut -f 2 -d .`
+if test "$MAJOR_VERSION" -ge 5  -a "$MINOR_VERSION" -ge 11 ; then
 	CFLAGS="$CFLAGS -DOPENSOLARIS -DSOL10"
 else
 	CFLAGS="$CFLAGS -DSOL10"

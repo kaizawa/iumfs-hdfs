@@ -1465,7 +1465,7 @@ iumfs_write(vnode_t *vp, struct uio *uiop, int ioflag, struct cred *cr)
          * NOTE: PAGESIZE 倍数値 uiop->loffset & ~(PAGESIZE - 1)。
          */
         if (uiop->uio_loffset > inp->fsize) {
-            cmn_err(CE_CONT, "iumfs_write: uio_loffset exceeds file size");
+            DEBUG_PRINT((CE_CONT, "iumfs_write: offset(%d) exceeds file size(%u)\n", uiop->uio_loffset, inp->fsize));            
         }
 
         mapoff = uiop->uio_loffset & MAXBMASK;
