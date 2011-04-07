@@ -56,7 +56,7 @@
 
 static int iumfscntl_attach(dev_info_t *dip, ddi_attach_cmd_t cmd);
 static int iumfscntl_detach(dev_info_t *dip, ddi_detach_cmd_t cmd);
-static int iumfscntl_open(dev_t *devp, int flag, int otyp, cred_t *cred);
+static int iumfscntl_open(dev_t *dev, int flag, int otyp, cred_t *cred);
 static int iumfscntl_close(dev_t dev, int flag, int otyp, cred_t *cred);
 static int iumfscntl_read(dev_t dev, struct uio *uiop, cred_t *credp);
 static int iumfscntl_write(dev_t dev, struct uio *uiop, cred_t *credp);
@@ -118,6 +118,10 @@ struct modldrv iumfs_modldrv = {
     &iumfscntl_ops // driver ops
 };
 
+//static int iumfscntl_cnt = NMINDEV; // NMINDEV はマイナーデバイス数(=可能なオープン数)
+static iumfscntl_soft_t * cntlsoft_fanout[NMINDEV]; // iumfscntl_soft_t 構造体の配列
+static dev_info_t *iumfscntl_dev_info;	/* private devinfo pointer */
+
 /*****************************************************************************
  * iumfscntl_attach
  *
@@ -127,10 +131,6 @@ struct modldrv iumfs_modldrv = {
 static int
 iumfscntl_attach(dev_info_t *dip, ddi_attach_cmd_t cmd)
 {
-    int instance;
-    iumfscntl_soft_t *cntlsoft = NULL;
-    caddr_t bufaddr = NULL;
-
     DEBUG_PRINT((CE_CONT, "iumfscntl_attach called\n"));
 
     if (cmd != DDI_ATTACH) {
@@ -139,56 +139,20 @@ iumfscntl_attach(dev_info_t *dip, ddi_attach_cmd_t cmd)
         return (DDI_FAILURE);
     }
 
-    instance = ddi_get_instance(dip);
-
-    /*
-     *　構造体を割り当てる
-     */
-    if (ddi_soft_state_zalloc(iumfscntl_soft_root, instance) != DDI_SUCCESS) {
-        cmn_err(CE_CONT, "iumfscntl_attach: failed to create minor node\n");
-        DEBUG_PRINT((CE_CONT, "iumfscntl_attach: return(DDI_FAILURE)\n"));
-        return (DDI_FAILURE);
-    }
-    cntlsoft = (iumfscntl_soft_t *) ddi_get_soft_state(iumfscntl_soft_root, instance);
-
-    bufaddr = kmem_zalloc(DEVICE_BUFFER_SIZE, KM_NOSLEEP);
-    if (bufaddr == NULL) {
-        cmn_err(CE_CONT, "iumfscntl_attach: kmem_zalloc failed");
-        goto err;
-    }
-
-    /*
-     * iumfscntl デバイスのステータス構造体を設定
-     */
-    cntlsoft->instance = instance; // インスタンス番号
-    cntlsoft->bufaddr = bufaddr; // read/write 時の uiomove に使う一時バッファ。
-    cntlsoft->dip = dip; // dev_info 構造体
-    mutex_init(&(cntlsoft->d_lock), NULL, MUTEX_DRIVER, NULL);
-    mutex_init(&(cntlsoft->s_lock), NULL, MUTEX_DRIVER, NULL);
-    cv_init(&cntlsoft->cv, NULL, CV_DRIVER, NULL);
-
     /*
      * /devicese/pseudo 以下にデバイスファイルを作成する
-     * マイナーデバイス番号は 0。
      */
     if (ddi_create_minor_node(dip, "iumfscntl", S_IFCHR, 0, DDI_PSEUDO, 0) == DDI_FAILURE) {
         ddi_remove_minor_node(dip, NULL);
         cmn_err(CE_CONT, "iumfscntl_attach: failed to create minor node\n");
         goto err;
     }
+
+    iumfscntl_dev_info = dip;    
     DEBUG_PRINT((CE_CONT, "iumfscntl_attach: return(DDI_SUCCESS)\n"));
     return (DDI_SUCCESS);
 
 err:
-    if (cntlsoft != NULL) {
-        mutex_destroy(&cntlsoft->d_lock);
-        mutex_destroy(&cntlsoft->s_lock);
-        cv_destroy(&cntlsoft->cv);
-        if (cntlsoft->bufaddr) {
-            kmem_free(cntlsoft->bufaddr, DEVICE_BUFFER_SIZE);
-        }
-        ddi_soft_state_free(iumfscntl_soft_root, instance);
-    }
     DEBUG_PRINT((CE_CONT, "iumfscntl_attach: return(DDI_FAILURE)\n"));
     return (DDI_FAILURE);
 }
@@ -202,9 +166,6 @@ err:
 static int
 iumfscntl_detach(dev_info_t *dip, ddi_detach_cmd_t cmd)
 {
-    int instance;
-    iumfscntl_soft_t *cntlsoft = NULL;
-
     DEBUG_PRINT((CE_CONT, "iumfscntl_dettach called\n"));
 
     if (cmd != DDI_DETACH) {
@@ -213,20 +174,10 @@ iumfscntl_detach(dev_info_t *dip, ddi_detach_cmd_t cmd)
         return (DDI_FAILURE);
     }
 
-    instance = ddi_get_instance(dip);
+//    instance = ddi_get_instance(dip);
 
-    cntlsoft = (iumfscntl_soft_t *) ddi_get_soft_state(iumfscntl_soft_root, instance);
-
-    if (cntlsoft == NULL) {
-        cmn_err(CE_CONT, "iumfscntl_dettach: can't get soft stat structure.\n");
-        DEBUG_PRINT((CE_CONT, "iumfscntl_dettach: return(DDI_FAILURE)\n"));
-        return (DDI_FAILURE);
-    }
-    mutex_destroy(&cntlsoft->d_lock);
-    mutex_destroy(&cntlsoft->s_lock);
-    kmem_free(cntlsoft->bufaddr, DEVICE_BUFFER_SIZE);
     ddi_remove_minor_node(dip, NULL);
-    ddi_soft_state_free(iumfscntl_soft_root, instance);
+
 
     DEBUG_PRINT((CE_CONT, "iumfscntl_dettach: return(DDI_SUCCESS)\n"));
     return (DDI_SUCCESS);
@@ -239,37 +190,74 @@ iumfscntl_detach(dev_info_t *dip, ddi_detach_cmd_t cmd)
  *
  *****************************************************************************/
 static int
-iumfscntl_open(dev_t *devp, int flag, int otyp, cred_t *cred)
+iumfscntl_open(dev_t *dev, int flag, int otyp, cred_t *cred)
 {
-    int instance;
-    iumfscntl_soft_t *cntlsoft;
+    int instance = 0;
+    iumfscntl_soft_t *cntlsoft = NULL;
     int err = 0;
+    minor_t newminor;
+    caddr_t bufaddr = NULL;
 
     DEBUG_PRINT((CE_CONT, "iumfscntl_open called\n"));
     if (otyp != OTYP_CHR) {
         err = EINVAL;
         goto out;
     }
-
-    instance = getminor(*devp);
-
-    cntlsoft = (iumfscntl_soft_t *) ddi_get_soft_state(iumfscntl_soft_root, instance);
-     if (cntlsoft == NULL) {
-         err = ENXIO;
-         goto out;
+    
+    for (newminor = 0 ; newminor < NMINDEV ; newminor++ ) {
+        if (cntlsoft_fanout[newminor] == NULL)
+            break;
     }
-
-    mutex_enter(&cntlsoft->s_lock);
-    if (cntlsoft->state & IUMFSCNTL_OPENED) {
-        // すでに /dev/cntlsoft はオープンされている
-        mutex_exit(&cntlsoft->s_lock);
-        err = EBUSY;
+    if(newminor >= NMINDEV){
+        err = ENXIO;        
         goto out;
     }
-    cntlsoft->state |= IUMFSCNTL_OPENED;
-    mutex_exit(&cntlsoft->s_lock);
+    
+    *dev = makedevice(getmajor(*dev), newminor);
+    instance = newminor; // use new minor dev number as instance number.
+    DEBUG_PRINT((CE_CONT, "new instance = %d",newminor));
 
-out:
+    /*
+     *　構造体を割り当てる
+     */
+    if (ddi_soft_state_zalloc(iumfscntl_soft_root, instance) != DDI_SUCCESS) {
+        cmn_err(CE_CONT, "iumfscntl_open: failed to create minor node\n");
+        err = DDI_FAILURE;
+        goto out;
+    }
+    cntlsoft = (iumfscntl_soft_t *) ddi_get_soft_state(iumfscntl_soft_root, instance);
+
+    bufaddr = kmem_zalloc(DEVICE_BUFFER_SIZE, KM_NOSLEEP);
+    if (bufaddr == NULL) {
+        cmn_err(CE_CONT, "iumfscntl_open: kmem_zalloc failed");
+        err = ENOMEM;
+        goto out;
+    }
+
+    /*
+     * iumfscntl デバイスのステータス構造体を設定
+     */
+    cntlsoft->instance = instance; // インスタンス番号
+    cntlsoft->bufaddr = bufaddr; // read/write 時の uiomove に使う一時バッファ。
+    cntlsoft->dip = iumfscntl_dev_info; // dev_info 構造体. TODO: 一つしか無いのでコピーする必要は無い。
+    mutex_init(&(cntlsoft->d_lock), NULL, MUTEX_DRIVER, NULL);
+    mutex_init(&(cntlsoft->s_lock), NULL, MUTEX_DRIVER, NULL);
+    cv_init(&cntlsoft->cv, NULL, CV_DRIVER, NULL);
+    cntlsoft->state |= IUMFSCNTL_OPENED;
+
+    cntlsoft_fanout[instance] = cntlsoft;
+
+  out:
+    if (err && cntlsoft != NULL) {
+        mutex_destroy(&cntlsoft->d_lock);
+        mutex_destroy(&cntlsoft->s_lock);
+        cv_destroy(&cntlsoft->cv);
+        if (cntlsoft->bufaddr) {
+            kmem_free(cntlsoft->bufaddr, DEVICE_BUFFER_SIZE);
+        }
+        ddi_soft_state_free(iumfscntl_soft_root, instance);
+    }
+    
     DEBUG_PRINT((CE_CONT, "iumfscntl_open: return(%d)\n", err));
     return (err);
 }
@@ -315,6 +303,14 @@ iumfscntl_close(dev_t dev, int flag, int otyp, cred_t *cred)
     }
     cntlsoft->state &= ~IUMFSCNTL_OPENED;
     mutex_exit(&cntlsoft->s_lock);
+    
+    mutex_destroy(&cntlsoft->d_lock);
+    mutex_destroy(&cntlsoft->s_lock);
+    kmem_free(cntlsoft->bufaddr, DEVICE_BUFFER_SIZE);
+
+    cntlsoft_fanout[instance] = NULL;
+    ddi_soft_state_free(iumfscntl_soft_root, instance);    
+    
 out:
     DEBUG_PRINT((CE_CONT, "iumfscntl_close: return(%d)\n",err));
     return (err);
