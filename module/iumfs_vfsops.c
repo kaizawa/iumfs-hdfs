@@ -65,7 +65,7 @@
 #include "iumfs.h"
 
 static mntopts_t iumfs_optproto;
-static kmutex_t iumfs_global_lock; // グローバルロック。
+kmutex_t iumfs_global_lock; // グローバルロック。
 static int iumfs_fstype; // ファイルシステムタイプ
 static major_t iumfs_major; // メジャーデバイス番号。モジュールロード後は固定
 static major_t iumfs_last_minor = 0; // 最後にマウントしたファイルシステムのマイナーデバイス番号

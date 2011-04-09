@@ -80,6 +80,8 @@
 #include <stddef.h>
 #include "iumfs.h"
 
+extern iumfscntl_soft_t cntlsoft_list[MAX_INST]; // iumfscntl_soft_t 構造体の配列
+
 /******************************************************************
  * iumfs_request_read()
  *
@@ -100,7 +102,6 @@ int
 iumfs_request_read(struct buf *bp, vnode_t *vp)
 {
     iumfscntl_soft_t *cntlsoft; // iumfscntl デバイスのデバイスステータス構造体
-    int instance = 0; // いまのところ固定値
     request_t *req;
     response_t *res;
     offset_t offset;
@@ -112,12 +113,6 @@ iumfs_request_read(struct buf *bp, vnode_t *vp)
 
     DEBUG_PRINT((CE_CONT, "iumfs_request_read called\n"));
 
-    cntlsoft = (iumfscntl_soft_t *) ddi_get_soft_state(iumfscntl_soft_root, instance);
-     if (cntlsoft == NULL) {
-         err = ENXIO;
-         goto out;
-    }
-
     /*
      * block 数から byte 数へ・・・なんか無意味な操作
      * ちなみに、b_bcount は PAGESIZE より大きい可能性もある
@@ -128,13 +123,13 @@ iumfs_request_read(struct buf *bp, vnode_t *vp)
     DEBUG_PRINT((CE_CONT, "iumfs_request_read: offset = %D, size = %d\n", offset, size));
 
     /*
-     * リクエストの順番待ちをする    
-     */
-    err = iumfs_daemon_request_enter(cntlsoft);
-    if (err) {
+     * オープン中で未使用の iumfscntl デバイスを受け取る。 
+     * もしすべてのデバイスが使用中ならリクエストの順番待ちをする
+     */  
+    if((err = iumfs_daemon_request_enter(&cntlsoft))){
         goto out;
     }
-
+    
     mutex_enter(&cntlsoft->d_lock);
     /*
      * マウントオプション、ファイルシステム依存ノード構造体、ユーザ空間とマッピング
@@ -206,8 +201,7 @@ out:
 int
 iumfs_request_readdir(vnode_t *dirvp)
 {
-    iumfscntl_soft_t *cntlsoft; // iumfscntl デバイスのデバイスステータス構造体
-    int instance = 0; // いまのところ固定値
+    iumfscntl_soft_t *cntlsoft; // オープン中の iumfscntl デバイスステータス構造体
     iumfs_dirent_t *headp; // デーモンから返ってきたエントリリストの先頭ポインタ
     iumfs_dirent_t *idp; //  処理用ポインタ
     request_t *req; // リクエスト構造体
@@ -223,15 +217,11 @@ iumfs_request_readdir(vnode_t *dirvp)
 
     DEBUG_PRINT((CE_CONT, "iumfs_request_readdir called\n"));
 
-    cntlsoft = (iumfscntl_soft_t *) ddi_get_soft_state(iumfscntl_soft_root, instance);
-     if (cntlsoft == NULL) {
-         err = ENXIO;
-         goto out;
-    }
-
-    // リクエストの順番待ちをする
-    err = iumfs_daemon_request_enter(cntlsoft);
-    if (err) {
+    /*
+     * オープン中で未使用の iumfscntl デバイスを受け取る。 
+     * もしすべてのデバイスが使用中ならリクエストの順番待ちをする
+     */  
+    if((err = iumfs_daemon_request_enter(&cntlsoft))){
         goto out;
     }
 
@@ -323,10 +313,13 @@ out:
  * iumfs_daemon_request_enter
  *
  * ユーザモードデーモンへのリクエスト要求を開始するための順番待ちをする。
- * 他の thread がリクエストを要求中であれば、この関数の中で待たされる。
+ * オープン中で、かつリクエスト受付可能な iumfscntl のアドレスを引数
+ * としてわたされたアドレスにセットする。
+ * すべての iumfscntl デバイス がリクエストを処理中であれば、この関数の中
+ * で待たされる。
  *
  * 引数:
- *        cntlsoft : iumfscntl デバイスのデバイスステータス構造体
+ *    cntlsoft : iumfscntl デバイスのステータス構造体のポインタのアドレス
  *
  * 戻り値
  *
@@ -335,24 +328,109 @@ out:
  * 
  *****************************************************************/
 int
-iumfs_daemon_request_enter(iumfscntl_soft_t *cntlsoft)
+iumfs_daemon_request_enter(iumfscntl_soft_t **cntlsoftp)
 {
+    iumfscntl_soft_t *cntlsoft;
+    int instance;
+    
     DEBUG_PRINT((CE_CONT, "iumfs_daemon_request_enter called\n"));
     /*
-     * すでに他の thread がデーモンへのリクエストを実行中だったら、その処理が終わるまで待つ。
-     * もし、誰もほかにリクエストを実行中でなかったら REQUEST_INPROGRESS フラグを立てて
-     * 処理を進める。（他の thread が同時に実行されないことを保障する）
-     */
-    mutex_enter(&cntlsoft->s_lock);
-    while (cntlsoft->state & REQUEST_INPROGRESS) {
-        if (cv_wait_sig(&cntlsoft->cv, &cntlsoft->s_lock) == 0) {
+     * インスタンス毎の iumfscntl デバイスのステータス構造体を設定
+     */ 
+    for (instance = 0 ; instance < MAX_INST ; instance++ ) {
+        cntlsoft = &cntlsoft_list[instance];
+        // ロック待ちするのは使われていると思われるので次へ
+        if (mutex_tryenter(&cntlsoft->s_lock) == 0)
+            continue;
+        // すでにオープンされていない場合, もしくはリクエスト処理中の場合も次へ
+        if (!(cntlsoft->state & IUMFSCNTL_OPENED) || cntlsoft->state & REQUEST_INPROGRESS ) {
+            if(!cntlsoft->state & IUMFSCNTL_OPENED) {
+                DEBUG_PRINT((CE_CONT, "iumfs_daemon_request_enter: inst=%d not opened state=0x%x",instance,cntlsoft->state));
+            }
+            if(cntlsoft->state & REQUEST_INPROGRESS) {
+                DEBUG_PRINT((CE_CONT, "iumfs_daemon_request_enter: inst=%d in progress state=0x%x",instance,cntlsoft->state));
+            }
             mutex_exit(&cntlsoft->s_lock);
-            DEBUG_PRINT((CE_CONT, "iumfs_daemon_request_enter: return(EINTR)\n"));
-            return (EINTR);
+            continue;
+        }
+        // 開いているオープン中の iumfscntl が見つかったようだ。
+        DEBUG_PRINT((CE_CONT, "iumfs_daemon_request_enter: uses instance %d", instance));        
+        cntlsoft->state |= REQUEST_INPROGRESS; // リクエスト中フラグをセット。       
+        mutex_exit(&cntlsoft->s_lock);
+        break;
+    }
+
+    /*
+     * 待ちなしで iumfscntl を見つけられなかった場合の処理。
+     * 最初に見つかったオープン中の iumfscntl で待つ。
+     */ 
+    if(instance >= MAX_INST){
+        DEBUG_PRINT((CE_WARN, "iumfscntl_daemon_request_enter: all instances were in use."));        
+        for (instance = 0 ; instance < MAX_INST ; instance++ ) {
+            cntlsoft = &cntlsoft_list[instance];        
+            mutex_enter(&cntlsoft->s_lock);
+            if (!(cntlsoft->state & IUMFSCNTL_OPENED)){
+                // オープンされていない。つぎへ。
+                mutex_exit(&cntlsoft->s_lock);
+                continue;
+            }                        
+            /*
+             * すでに他の thread がデーモンへのリクエストを実行中だったら、その処理が終わるまで待つ。
+             * もし、誰もほかにリクエストを実行中でなかったら REQUEST_INPROGRESS フラグを立てて
+             * 処理を進める。（他の thread が同時に実行されないことを保障する）
+             */
+            while (cntlsoft->state & REQUEST_INPROGRESS) {
+                if (cv_wait_sig(&cntlsoft->cv, &cntlsoft->s_lock) == 0) {
+                    mutex_exit(&cntlsoft->s_lock);
+                    DEBUG_PRINT((CE_CONT, "iumfs_daemon_request_enter: return(EINTR)\n"));
+                    return (EINTR);
+                }
+            }
+            // やっと使える iumfscntl が確保できた!
+            cntlsoft->state |= REQUEST_INPROGRESS;
+            mutex_exit(&cntlsoft->s_lock);
+            break;
         }
     }
-    cntlsoft->state |= REQUEST_INPROGRESS;
-    mutex_exit(&cntlsoft->s_lock);
+    /*
+     * オープン中の iumfscntl が無い模様。
+     * しかたないので、最初に見つかった iumfscntl で待つ。
+     * TODO: OPEN 待ちの仕組みをつくるべき。こもままでは他のインスタンスでオープンされたのが気がつけない。
+     */ 
+    if(instance >= MAX_INST){
+        instance = 0;
+        cmn_err(CE_WARN, "iumfscntl_daemon_request_enter: no instance is opened.");
+        cmn_err(CE_WARN, "iumfscntl_daemon_request_enter: waiting on instance 0.");         
+            cntlsoft = &cntlsoft_list[instance];        
+            mutex_enter(&cntlsoft->s_lock);
+            while (cntlsoft->state & IUMFSCNTL_OPENED) {
+                if (cv_wait_sig(&cntlsoft->cv, &cntlsoft->s_lock) == 0) {
+                    mutex_exit(&cntlsoft->s_lock);
+                    DEBUG_PRINT((CE_CONT, "iumfs_daemon_request_enter: return(EINTR)\n"));
+                    return (EINTR);
+                }
+            }
+            // やっとオープンした。他のスレッドに取られちゃっているかも。INPROGRESS フラグをチェック。
+            while (cntlsoft->state & REQUEST_INPROGRESS) {
+                if (cv_wait_sig(&cntlsoft->cv, &cntlsoft->s_lock) == 0) {
+                    mutex_exit(&cntlsoft->s_lock);
+                    DEBUG_PRINT((CE_CONT, "iumfs_daemon_request_enter: return(EINTR)\n"));
+                    return (EINTR);
+                }
+            }            
+            // やっと使える iumfscntl が確保できた!
+            cntlsoft->state |= REQUEST_INPROGRESS;
+            mutex_exit(&cntlsoft->s_lock);
+    }
+    *cntlsoftp = cntlsoft;
+
+    if (cntlsoftp == NULL) {
+        DEBUG_PRINT((CE_CONT, "iumfs_daemon_request_enter: cntlsoftp is null"));
+    } else {
+        DEBUG_PRINT((CE_CONT, "iumfs_daemon_request_enter: cntlsoftp = 0x%p", cntlsoftp));
+
+    }
+    
     DEBUG_PRINT((CE_CONT, "iumfs_daemon_request_enter: return(0)\n"));
     return (0);
 }
@@ -486,7 +564,6 @@ int
 iumfs_request_lookup(vnode_t *dirvp, char *pathname, vattr_t *vap)
 {
     iumfscntl_soft_t *cntlsoft; // iumfscntl デバイスのデバイスステータス構造体
-    int instance = 0; // いまのところ固定値
     request_t *req;
     response_t *res;
     iumfs_t *iumfsp; // ファイルシステム型依存のプライベートデータ構造体
@@ -496,19 +573,13 @@ iumfs_request_lookup(vnode_t *dirvp, char *pathname, vattr_t *vap)
 
     DEBUG_PRINT((CE_CONT, "iumfs_request_lookup called\n"));
 
-    cntlsoft = (iumfscntl_soft_t *) ddi_get_soft_state(iumfscntl_soft_root, instance);
-     if (cntlsoft == NULL) {
-         err = ENXIO;
-         goto out;
-    }
-
     /*
-     * リクエストの順番待ちをする    
-     */
-    err = iumfs_daemon_request_enter(cntlsoft);
-    if (err) {
+     * オープン中で未使用の iumfscntl デバイスを受け取る。 
+     * もしすべてのデバイスが使用中ならリクエストの順番待ちをする
+     */  
+    if((err = iumfs_daemon_request_enter(&cntlsoft))){
         goto out;
-    }
+    }     
 
     mutex_enter(&cntlsoft->d_lock);
     /*
@@ -599,7 +670,6 @@ int
 iumfs_request_getattr(vnode_t *vp)
 {
     iumfscntl_soft_t *cntlsoft; // iumfscntl デバイスのデバイスステータス構造体
-    int instance = 0; // いまのところ固定値
     request_t *req;
     response_t *res;
     iumfs_t *iumfsp; // ファイルシステム型依存のプライベートデータ構造体
@@ -610,19 +680,13 @@ iumfs_request_getattr(vnode_t *vp)
 
     DEBUG_PRINT((CE_CONT, "iumfs_request_getattr called\n"));
 
-    cntlsoft = (iumfscntl_soft_t *) ddi_get_soft_state(iumfscntl_soft_root, instance);
-     if (cntlsoft == NULL) {
-         err = ENXIO;
-         goto out;
-    }
-
     /*
-     * リクエストの順番待ちをする    
-     */
-    err = iumfs_daemon_request_enter(cntlsoft);
-    if (err) {
+     * オープン中で未使用の iumfscntl デバイスを受け取る。 
+     * もしすべてのデバイスが使用中ならリクエストの順番待ちをする
+     */  
+    if((err = iumfs_daemon_request_enter(&cntlsoft))){
         goto out;
-    }
+    }     
 
     mutex_enter(&cntlsoft->d_lock);
     /*
@@ -720,7 +784,6 @@ int
 iumfs_request_write(struct buf *bp, vnode_t *vp)
 {
     iumfscntl_soft_t *cntlsoft; // iumfscntl デバイスのデバイスステータス構造体
-    int instance = 0; // いまのところ固定値
     request_t *req;
     offset_t offset;
     size_t size;
@@ -730,12 +793,6 @@ iumfs_request_write(struct buf *bp, vnode_t *vp)
     int err = 0;
 
     DEBUG_PRINT((CE_CONT, "iumfs_request_write called\n"));
-
-    cntlsoft = (iumfscntl_soft_t *) ddi_get_soft_state(iumfscntl_soft_root, instance);
-     if (cntlsoft == NULL) {
-         err = ENXIO;
-         goto out;
-    }
 
     /*
      * block 数から byte 数へ・・・なんか無意味な操作
@@ -747,10 +804,10 @@ iumfs_request_write(struct buf *bp, vnode_t *vp)
     DEBUG_PRINT((CE_CONT, "iumfs_request_write: offset = %D, size = %d\n", offset, size));
 
     /*
-     * リクエストの順番待ちをする
-     */
-    err = iumfs_daemon_request_enter(cntlsoft);
-    if (err) {
+     * オープン中で未使用の iumfscntl デバイスを受け取る。 
+     * もしすべてのデバイスが使用中ならリクエストの順番待ちをする
+     */  
+    if((err = iumfs_daemon_request_enter(&cntlsoft))){
         goto out;
     }
 
@@ -825,7 +882,6 @@ iumfs_request_create(vnode_t *dirvp, char *name, vattr_t *vap)
     err = ENOTSUP;
 #else
     iumfscntl_soft_t *cntlsoft; // iumfscntl デバイスのデバイスステータス構造体
-    int instance = 0; // いまのところ固定値
     request_t *req;
     iumfs_t *iumfsp; // ファイルシステム型依存のプライベートデータ構造体
     iumnode_t *dirinp;
@@ -833,20 +889,13 @@ iumfs_request_create(vnode_t *dirvp, char *name, vattr_t *vap)
     iumfs_vattr_t *ivap;
 
     DEBUG_PRINT((CE_CONT, "iumfs_request_create called\n"));
-
-    cntlsoft = (iumfscntl_soft_t *) ddi_get_soft_state(iumfscntl_soft_root, instance);
-     if (cntlsoft == NULL) {
-         err = ENXIO;
-         goto out;
-    }
-
     DEBUG_PRINT((CE_CONT, "iumfs_request_create: filename=%s\n", name));
 
     /*
-     * リクエストの順番待ちをする
-     */
-    err = iumfs_daemon_request_enter(cntlsoft);
-    if (err) {
+     * オープン中で未使用の iumfscntl デバイスを受け取る。 
+     * もしすべてのデバイスが使用中ならリクエストの順番待ちをする
+     */  
+    if((err = iumfs_daemon_request_enter(&cntlsoft))){
         goto out;
     }
 
@@ -927,7 +976,6 @@ int
 iumfs_request_remove(vnode_t *vp)
 {
     iumfscntl_soft_t *cntlsoft; // iumfscntl デバイスのデバイスステータス構造体
-    int instance = 0; // いまのところ固定値
     request_t *req;
     iumfs_t *iumfsp; // ファイルシステム型依存のプライベートデータ構造体
     iumnode_t *inp;
@@ -936,19 +984,13 @@ iumfs_request_remove(vnode_t *vp)
 
     DEBUG_PRINT((CE_CONT, "iumfs_request_remove called\n"));
 
-    cntlsoft = (iumfscntl_soft_t *) ddi_get_soft_state(iumfscntl_soft_root, instance);
-     if (cntlsoft == NULL) {
-         err = ENXIO;
-         goto out;
-    }
-
     /*
-     * リクエストの順番待ちをする    
-     */
-    err = iumfs_daemon_request_enter(cntlsoft);
-    if (err) {
+     * オープン中で未使用の iumfscntl デバイスを受け取る。 
+     * もしすべてのデバイスが使用中ならリクエストの順番待ちをする
+     */  
+    if((err = iumfs_daemon_request_enter(&cntlsoft))){
         goto out;
-    }
+    }     
 
     mutex_enter(&cntlsoft->d_lock);
     /*
@@ -1011,7 +1053,6 @@ int
 iumfs_request_mkdir(vnode_t *dirvp, char *name, vattr_t *vap)
 {    
     iumfscntl_soft_t *cntlsoft; // iumfscntl デバイスのデバイスステータス構造体
-    int instance = 0; // いまのところ固定値
     request_t *req;
     iumfs_t *iumfsp; // ファイルシステム型依存のプライベートデータ構造体
     iumnode_t *dirinp;
@@ -1020,20 +1061,13 @@ iumfs_request_mkdir(vnode_t *dirvp, char *name, vattr_t *vap)
     int err = 0;
 
     DEBUG_PRINT((CE_CONT, "iumfs_request_mkdir called\n"));
-
-    cntlsoft = (iumfscntl_soft_t *) ddi_get_soft_state(iumfscntl_soft_root, instance);
-     if (cntlsoft == NULL) {
-         err = ENXIO;
-         goto out;
-    }
-
     DEBUG_PRINT((CE_CONT, "iumfs_request_mkdir: filename=%s\n", name));
 
     /*
-     * リクエストの順番待ちをする
-     */
-    err = iumfs_daemon_request_enter(cntlsoft);
-    if (err) {
+     * オープン中で未使用の iumfscntl デバイスを受け取る。 
+     * もしすべてのデバイスが使用中ならリクエストの順番待ちをする
+     */  
+    if((err = iumfs_daemon_request_enter(&cntlsoft))){
         goto out;
     }
 
@@ -1108,7 +1142,6 @@ int
 iumfs_request_rmdir(vnode_t *vp)
 {
     iumfscntl_soft_t *cntlsoft; // iumfscntl デバイスのデバイスステータス構造体
-    int instance = 0; // いまのところ固定値
     request_t *req;
     iumfs_t *iumfsp; // ファイルシステム型依存のプライベートデータ構造体
     iumnode_t *inp;
@@ -1117,17 +1150,11 @@ iumfs_request_rmdir(vnode_t *vp)
 
     DEBUG_PRINT((CE_CONT, "iumfs_request_rmdir called\n"));
 
-    cntlsoft = (iumfscntl_soft_t *) ddi_get_soft_state(iumfscntl_soft_root, instance);
-     if (cntlsoft == NULL) {
-         err = ENXIO;
-         goto out;
-    }
-
     /*
-     * リクエストの順番待ちをする    
-     */
-    err = iumfs_daemon_request_enter(cntlsoft);
-    if (err) {
+     * オープン中で未使用の iumfscntl デバイスを受け取る。 
+     * もしすべてのデバイスが使用中ならリクエストの順番待ちをする
+     */  
+    if((err = iumfs_daemon_request_enter(&cntlsoft))){
         goto out;
     }
 

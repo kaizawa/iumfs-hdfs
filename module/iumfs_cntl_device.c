@@ -31,6 +31,12 @@
  *  
  * Device driver to intermidicate between IUMFS filesystem
  * module and user mode daemon.
+ *
+ * 構想。
+ * soft_state 構造体を get_soft_zalloc で確保するのをやめ、自前で
+ * あらかじめ確保するようにする。
+ * 最大インスタンス数分だけ確保してから使いたい人がロックをとって state を
+ * 変更して解放されないようにする。
  *   
  **************************************************************/
 #include <sys/modctl.h>
@@ -65,6 +71,7 @@ static int iumfscntl_devmap(dev_t dev, devmap_cookie_t handle, offset_t off, siz
 static int iumfscntl_poll(dev_t dev, short events, int anyyet, short *reventsp, struct pollhead **phpp);
 
 void *iumfscntl_soft_root = NULL; // iumfscntl デバイスのソフトステート構造体
+extern kmutex_t iumfs_global_lock; // グローバルロック。
 
 struct ddi_device_acc_attr iumfscntl_acc_attr = {
     DDI_DEVICE_ATTR_V0,
@@ -119,7 +126,7 @@ struct modldrv iumfs_modldrv = {
 };
 
 //static int iumfscntl_cnt = NMINDEV; // NMINDEV はマイナーデバイス数(=可能なオープン数)
-static iumfscntl_soft_t * cntlsoft_fanout[MAX_INST]; // iumfscntl_soft_t 構造体の配列
+iumfscntl_soft_t cntlsoft_list[MAX_INST]; // iumfscntl_soft_t 構造体の配列
 static dev_info_t *iumfscntl_dev_info;	/* private devinfo pointer */
 
 /*****************************************************************************
@@ -131,28 +138,51 @@ static dev_info_t *iumfscntl_dev_info;	/* private devinfo pointer */
 static int
 iumfscntl_attach(dev_info_t *dip, ddi_attach_cmd_t cmd)
 {
+    iumfscntl_soft_t *cntlsoft = NULL;    
+    int instance;
+    
     DEBUG_PRINT((CE_CONT, "iumfscntl_attach called\n"));
+    mutex_enter(&iumfs_global_lock);            
 
     if (cmd != DDI_ATTACH) {
         cmn_err(CE_WARN, "iumfscntl_attach: cmd is not DDI_ATTACH\n");
         DEBUG_PRINT((CE_CONT, "iumfscntl_attach: return(DDI_FAILURE)\n"));
-        return (DDI_FAILURE);
+        goto err;
     }
 
-    /*
-     * /devicese/pseudo 以下にデバイスファイルを作成する
-     */
+    // devicese/pseudo 以下にデバイスファイルを作成する
     if (ddi_create_minor_node(dip, "iumfscntl", S_IFCHR, 0, DDI_PSEUDO, 0) == DDI_FAILURE) {
         ddi_remove_minor_node(dip, NULL);
         cmn_err(CE_CONT, "iumfscntl_attach: failed to create minor node\n");
         goto err;
     }
 
-    iumfscntl_dev_info = dip;    
+    /*
+     * インスタンス毎の iumfscntl デバイスのステータス構造体を設定
+     */ 
+    for(instance = 0 ; instance < MAX_INST ; instance++ ){
+        cntlsoft = &cntlsoft_list[instance];
+        caddr_t bufaddr = kmem_zalloc(DEVICE_BUFFER_SIZE, KM_NOSLEEP);
+        if (bufaddr == NULL) {
+            cmn_err(CE_CONT, "iumfscntl_open: kmem_zalloc failed");
+            goto err;
+        }
+        cntlsoft->state = 0; // フラグ初期化
+        cntlsoft->instance = instance; // インスタンス番号
+        cntlsoft->bufaddr = bufaddr; // read/write 時の uiomove に使う一時バッファ。
+        cntlsoft->dip = dip; // dev_info 構造体. TODO: 一つしか無いのでコピーする必要は無い。
+        mutex_init(&cntlsoft->d_lock, NULL, MUTEX_DRIVER, NULL);
+        mutex_init(&cntlsoft->s_lock, NULL, MUTEX_DRIVER, NULL);
+        DEBUG_PRINT((CE_CONT, "iumfscntl_attach: instance=%d,initialized mutex 0x%p", instance, &cntlsoft->d_lock)); //TODO: remove
+        cv_init(&cntlsoft->cv, NULL, CV_DRIVER, NULL);
+    }
+    iumfscntl_dev_info = dip;
+    mutex_exit(&iumfs_global_lock);
     DEBUG_PRINT((CE_CONT, "iumfscntl_attach: return(DDI_SUCCESS)\n"));
     return (DDI_SUCCESS);
 
 err:
+    mutex_exit(&iumfs_global_lock);                    
     DEBUG_PRINT((CE_CONT, "iumfscntl_attach: return(DDI_FAILURE)\n"));
     return (DDI_FAILURE);
 }
@@ -166,7 +196,11 @@ err:
 static int
 iumfscntl_detach(dev_info_t *dip, ddi_detach_cmd_t cmd)
 {
+    iumfscntl_soft_t *cntlsoft = NULL;
+    int instance;
+    
     DEBUG_PRINT((CE_CONT, "iumfscntl_dettach called\n"));
+    mutex_enter(&iumfs_global_lock);    
 
     if (cmd != DDI_DETACH) {
         cmn_err(CE_WARN, "iumfscntl_dettach: cmd is not DDI_DETACH\n");
@@ -174,8 +208,41 @@ iumfscntl_detach(dev_info_t *dip, ddi_detach_cmd_t cmd)
         return (DDI_FAILURE);
     }
 
+    /*
+     * インスタンス毎の iumfscntl デバイスのステータス構造体を設定
+     */ 
+    for(instance = 0 ; instance < MAX_INST ; instance ++){
+        cntlsoft = &cntlsoft_list[instance];
+        mutex_enter(&cntlsoft->s_lock);
+        /*
+         * state の DAEMON_INPROGRESS フラグが解除されるのを待っている thread が
+         * いるかもしれないので、フラグを解除。
+         */
+        if(cntlsoft->state & IUMFSCNTL_OPENED) {
+            cmn_err(CE_WARN, "iumfscntl_detach: instance %d is opened.", instance);
+        }
+
+        if (cntlsoft->state & DAEMON_INPROGRESS) {
+            cmn_err(CE_WARN, "iumfscntl_detach: instance %d is inprogress.", instance);
+            cntlsoft->state &= ~DAEMON_INPROGRESS; // DAEMON_INPROGRESS フラグを解除
+            cntlsoft->state |= BUFFER_INVALID; // マップされたアドレスのデータが不正であることを知らせる
+            cntlsoft->error = EIO; // エラーをセット
+            cv_broadcast(&cntlsoft->cv); // thread を起こす
+        }
+        cntlsoft->state &= ~IUMFSCNTL_OPENED;
+        mutex_exit(&cntlsoft->s_lock);
+
+        /*
+         *  もしここで上記のワーニングの状況が発生するならここで開放作業をするのは良くないかもしれない。
+         */
+        mutex_destroy(&cntlsoft->d_lock);
+        mutex_destroy(&cntlsoft->s_lock);
+        kmem_free(cntlsoft->bufaddr, DEVICE_BUFFER_SIZE);
+    }    
+
     ddi_remove_minor_node(dip, NULL);
-    
+
+    mutex_exit(&iumfs_global_lock);    
     DEBUG_PRINT((CE_CONT, "iumfscntl_dettach: return(DDI_SUCCESS)\n"));
     return (DDI_SUCCESS);
 }
@@ -193,69 +260,40 @@ iumfscntl_open(dev_t *dev, int flag, int otyp, cred_t *cred)
     iumfscntl_soft_t *cntlsoft = NULL;
     int err = 0;
     minor_t newminor;
-    caddr_t bufaddr = NULL;
 
     DEBUG_PRINT((CE_CONT, "iumfscntl_open called\n"));
+
     if (otyp != OTYP_CHR) {
         err = EINVAL;
         goto out;
     }
 
     for (instance = 0 ; instance < MAX_INST ; instance++ ) {
-        if (cntlsoft_fanout[instance] == NULL)
-            break;
+        cntlsoft = &cntlsoft_list[instance];
+        // ロック待ちするのは使われていると思われるので次へ
+        if (mutex_tryenter(&cntlsoft->s_lock) == 0)
+            continue;
+        // すでにオープンされている場合も次へ
+        if (cntlsoft->state & IUMFSCNTL_OPENED) {
+            mutex_exit(&cntlsoft->s_lock);
+            continue;
+        }
+        newminor = INST2MINOR(instance);
+        *dev = makedevice(getmajor(*dev), newminor);
+        cntlsoft->state |= IUMFSCNTL_OPENED; // 準備完了。フラグをOPENにセット。
+        cv_broadcast(&cntlsoft->cv); // 待ってる thread がいるかも知れないので通知        
+         mutex_exit(&cntlsoft->s_lock);
+        break;
     }
     
     if(instance >= MAX_INST){
+        cmn_err(CE_WARN, "iumfscntl_open: all instances were in use.");        
         err = ENXIO;        
         goto out;
     }
-    DEBUG_PRINT((CE_CONT, "iumfscntl_open: new instance = %d",instance));    
-
-    newminor = INST2MINOR(instance);
-     *dev = makedevice(getmajor(*dev), newminor);
-
-    /*
-     *　構造体を割り当てる
-     */
-    if (ddi_soft_state_zalloc(iumfscntl_soft_root, instance) != DDI_SUCCESS) {
-        cmn_err(CE_CONT, "iumfscntl_open: failed to alloc soft state structure\n");
-        err = DDI_FAILURE;
-        goto out;
-    }
-    cntlsoft = (iumfscntl_soft_t *) ddi_get_soft_state(iumfscntl_soft_root, instance);
-
-    bufaddr = kmem_zalloc(DEVICE_BUFFER_SIZE, KM_NOSLEEP);
-    if (bufaddr == NULL) {
-        cmn_err(CE_CONT, "iumfscntl_open: kmem_zalloc failed");
-        err = ENOMEM;
-        goto out;
-    }
-
-    /*
-     * iumfscntl デバイスのステータス構造体を設定
-     */
-    cntlsoft->instance = instance; // インスタンス番号
-    cntlsoft->bufaddr = bufaddr; // read/write 時の uiomove に使う一時バッファ。
-    cntlsoft->dip = iumfscntl_dev_info; // dev_info 構造体. TODO: 一つしか無いのでコピーする必要は無い。
-    mutex_init(&(cntlsoft->d_lock), NULL, MUTEX_DRIVER, NULL);
-    mutex_init(&(cntlsoft->s_lock), NULL, MUTEX_DRIVER, NULL);
-    cv_init(&cntlsoft->cv, NULL, CV_DRIVER, NULL);
-    cntlsoft->state |= IUMFSCNTL_OPENED;
-
-    cntlsoft_fanout[instance] = cntlsoft;
+    DEBUG_PRINT((CE_CONT, "iumfscntl_open: new instance = %d",instance));
 
   out:
-    if (err && cntlsoft != NULL) {
-        mutex_destroy(&cntlsoft->d_lock);
-        mutex_destroy(&cntlsoft->s_lock);
-        cv_destroy(&cntlsoft->cv);
-        if (cntlsoft->bufaddr) {
-            kmem_free(cntlsoft->bufaddr, DEVICE_BUFFER_SIZE);
-        }
-        ddi_soft_state_free(iumfscntl_soft_root, instance);
-    }
-    
     DEBUG_PRINT((CE_CONT, "iumfscntl_open: return(%d)\n", err));
     return (err);
 }
@@ -279,14 +317,8 @@ iumfscntl_close(dev_t dev, int flag, int otyp, cred_t *cred)
         err = EINVAL;
         goto out;
     }
-
     instance = MINOR2INST(getminor(dev)); // get instance number from minor
-    cntlsoft = ddi_get_soft_state(iumfscntl_soft_root, instance);
-     if (cntlsoft == NULL) {
-         err = ENXIO;
-         goto out;
-    }
-
+    cntlsoft = &cntlsoft_list[instance];
     mutex_enter(&cntlsoft->s_lock);
     /*
      * state の DAEMON_INPROGRESS フラグが解除されるのを待っている thread が
@@ -298,17 +330,10 @@ iumfscntl_close(dev_t dev, int flag, int otyp, cred_t *cred)
         cntlsoft->error = EIO; // エラーをセット
         cv_broadcast(&cntlsoft->cv); // thread を起こす
     }
-    cntlsoft->state &= ~IUMFSCNTL_OPENED;
+    cntlsoft->state &= ~IUMFSCNTL_OPENED; // オープン中フラグを外す。
     mutex_exit(&cntlsoft->s_lock);
     
-    mutex_destroy(&cntlsoft->d_lock);
-    mutex_destroy(&cntlsoft->s_lock);
-    kmem_free(cntlsoft->bufaddr, DEVICE_BUFFER_SIZE);
-
-    cntlsoft_fanout[instance] = NULL;
-    ddi_soft_state_free(iumfscntl_soft_root, instance);    
-    
-out:
+  out:
     DEBUG_PRINT((CE_CONT, "iumfscntl_close: return(%d)\n",err));
     return (err);
 }
@@ -330,7 +355,7 @@ iumfscntl_read(dev_t dev, struct uio *uiop, cred_t *credp)
     DEBUG_PRINT((CE_CONT, "iumfscntl_read called\n"));
 
     instance = MINOR2INST(getminor(dev)); // get instance number from minor
-    cntlsoft = ddi_get_soft_state(iumfscntl_soft_root, instance);
+    cntlsoft = &cntlsoft_list[instance];
     if (cntlsoft == NULL) {
         err = ENXIO;
         goto out;
@@ -405,7 +430,7 @@ iumfscntl_write(dev_t dev, struct uio *uiop, cred_t *credp)
     DEBUG_PRINT((CE_CONT, "iumfscntl_write called\n"));
 
     instance = MINOR2INST(getminor(dev)); // get instance number from minor    
-    cntlsoft = ddi_get_soft_state(iumfscntl_soft_root, instance);
+    cntlsoft = &cntlsoft_list[instance];    
     if (cntlsoft == NULL) {
         cmn_err(CE_CONT, "iumfscntl_write: can't get soft state structure.\n");
         err = ENXIO;
@@ -480,7 +505,7 @@ iumfscntl_devmap(dev_t dev, devmap_cookie_t handle, offset_t off, size_t len, si
     DEBUG_PRINT((CE_CONT, "iumfscntl_devmap called\n"));
 
     instance = MINOR2INST(getminor(dev)); // get instance number from minor        
-    cntlsoft = ddi_get_soft_state(iumfscntl_soft_root, instance);
+    cntlsoft = &cntlsoft_list[instance];    
     if (cntlsoft == NULL) {
         cmn_err(CE_WARN, "iumfscntl_devmap: can't get soft state structure.\n");
         err = ENXIO;
@@ -525,7 +550,7 @@ iumfscntl_poll(dev_t dev, short events, int anyyet, short *reventsp, struct poll
     DEBUG_PRINT((CE_CONT, "iumfscntl_poll called\n"));
 
     instance = MINOR2INST(getminor(dev)); // get instance number from minor            
-    cntlsoft = ddi_get_soft_state(iumfscntl_soft_root, instance);
+    cntlsoft = &cntlsoft_list[instance];    
     if (cntlsoft == NULL) {
         cmn_err(CE_WARN, "iumfscntl_poll: can't get soft state structure.\n");
         err = ENXIO;
@@ -565,3 +590,4 @@ out:
     DEBUG_PRINT((CE_CONT, "iumfscntl_poll: return(%d)\n", err));
     return (err);
 }
+

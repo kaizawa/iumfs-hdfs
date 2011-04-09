@@ -167,8 +167,8 @@ typedef struct iumfs_vattr
 #define BLOCKSIZE       512     // iumfs ファイルシステムのブロックサイズ
 #define MAX_INST         10     // iumfscntl の最大インスタンス数
 
-#define MINOR2INST(minor) minor - 1
-#define INST2MINOR(instance) instance + 1
+#define MINOR2INST(minor) minor //- 1
+#define INST2MINOR(instance) instance //+ 1
 
 #ifdef DEBUG
 #define  DEBUG_PRINT(args)  debug_print args
@@ -337,7 +337,7 @@ extern int iumfs_request_read(struct buf *, vnode_t *);
 extern int iumfs_request_readdir(vnode_t *);
 extern int iumfs_request_lookup(vnode_t *, char *, vattr_t *);
 extern int iumfs_request_getattr(vnode_t *);
-extern int iumfs_daemon_request_enter(iumfscntl_soft_t  *);
+extern int iumfs_daemon_request_enter(iumfscntl_soft_t  **);
 extern int iumfs_daemon_request_start(iumfscntl_soft_t  *);
 extern void iumfs_daemon_request_exit(iumfscntl_soft_t  *);
 extern vnode_t *iumfs_find_parent_vnode(vnode_t *);
