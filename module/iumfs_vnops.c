@@ -456,6 +456,11 @@ out:
 /************************************************************************
  * iumfs_getattr()  VNODE オペレーション
  *
+ * TODO: ここを通過した vnode が fop_getattr 内で Bad Trap で panic してしまう。
+ * どうやら参照カウントが1になって iumfs_free_node が呼ばれてしまうようだ。
+ * というか、 これをよぶ fop_getattr は err で返しても err 判定もせずにそのまま
+ * vnode を継続使用してしまう・・・だめだこりゃ。
+ *
  * GETATTR ルーチン
  *************************************************************************/
 static int
@@ -484,13 +489,22 @@ iumfs_getattr(vnode_t *vp, vattr_t *vap, int flags, struct cred *cr)
     /*
      * ユーザモードデーモンに最新の属性情報を問い合わせる。
      */
-    err = iumfs_request_getattr(vp);
-
+    if(err = iumfs_request_getattr(vp)){
+        return (err);
+    }
+    
+    /*
+     * TODO: ここで vnode の 参照カウントを減らしては駄目だ。上位ではこの後も vnode を使うので
+     * ここで参照カウント減らすと、free されて fop_getattr 内でpanic に至る。
+     * しかし、じゃあだれが減らすのか?という問題も残る。
+     * iumfs_request_readdir とかでサーバ側にエントリが亡くなった時点で参照カウント外すべきなのかも。。。
+     * 
+     * 
     if (err && iumfs_is_root(vp) == FALSE) {
-        /*
-         * 対象ファイルが Server 上に見つからなかった。エントリを削除する。
-         * ファイルシステム・ルートの場合は削除はせず、現状のデータを返す。
-         */
+        //
+        // 対象ファイルが Server 上に見つからなかった。エントリを削除する。
+        // ファイルシステム・ルートの場合は削除はせず、現状のデータを返す。
+        //
         DEBUG_PRINT((CE_CONT, "iumfs_getattr: can't update latest attr of vnode(=%p)", vp));
         // 親ディレクトリを探す
         if ((parentvp = iumfs_find_parent_vnode(vp)) == NULL) {
@@ -507,25 +521,26 @@ iumfs_getattr(vnode_t *vp, vattr_t *vap, int flags, struct cred *cr)
         // スラッシュから始まっているので、一文字ずらす
         name++;
 
-        /*
-         * 親ディレクトリからエントリを削除
-         * その後、iumfs_find_parent_vnode() で増やされたの親ディレクトリの参照カウント分を減らす 
-         */
+        //
+        // 親ディレクトリからエントリを削除
+        // その後、iumfs_find_parent_vnode() で増やされたの親ディレクトリの参照カウント分を減らす 
+        //
         iumfs_remove_entry_from_dir(parentvp, name);
         VN_RELE(parentvp);
 
-        /*
-         * 最後にこの vnode の参照カウントを減らす。
-         * この vnode を参照中の人がいるかもしれないので（たとえば shell の
-         * カレントディレクトリ）、ここでは free はしない。
-         * 参照数が 1 になった段階で iumfs_inactive() が呼ばれ、iumfs_inactive()
-         * から free される。
-         */
+        //
+        // 最後にこの vnode の参照カウントを減らす。
+        // この vnode を参照中の人がいるかもしれないので（たとえば shell の
+        // カレントディレクトリ）、ここでは free はしない。
+        // 参照数が 1 になった段階で iumfs_inactive() が呼ばれ、iumfs_inactive()
+        // から free される。
+        //
         VN_RELE(vp); // vnode 作成時に増加された参照カウント分を減らす。
         DEBUG_PRINT((CE_CONT, "iumfs_getattr: return(%d)\n", err));
         return (err);
     }
-
+    */
+    
     curr_mtime = inp->vattr.va_mtime;
 
     /*
