@@ -167,6 +167,12 @@ typedef struct iumfs_vattr
 #define BLOCKSIZE       512     // iumfs ファイルシステムのブロックサイズ
 #define MAX_INST         10     // iumfscntl の最大インスタンス数
 
+/*
+ * 以下の2つのマクロは MINOR デバイス番号 0 をつかってはだめ
+ * だと考えて minor = instance -1 とするために作ったもの。
+ * が、テストの結果問題なさそうなので、 minor = instance
+ * としている。やっぱりこのほうが分り易い。。。
+ */ 
 #define MINOR2INST(minor) minor //- 1
 #define INST2MINOR(instance) instance //+ 1
 
@@ -239,6 +245,26 @@ typedef struct iumfs_vattr
 #define MAX(a,b) ((a) < (b) ? (b) : (a))
 
 /*
+ * ディレクトリエントリの健全性チェック。おかしければ PANIC!
+ * このマクロは iumnode のロック(i_lock)を取得してから呼び出すこと!
+ */
+#define DIRENT_SANITY_CHECK(name, dirinp) { \
+    offset_t offset;\
+    dirent64_t *dentp;\
+    vnode_t *dirvp = IUMNODE2VNODE(dirinp);\
+    for (offset = 0; offset < dirinp->dlen; offset += dentp->d_reclen) {\
+        dentp = (dirent64_t *) ((char *) dirinp->data + offset);\
+        if(dentp->d_reclen == 0) {\
+            cmn_err(CE_PANIC, "%s: d_reclen is 0. dirvp=0x%p,dirinp=0x%p,dentp=0x%p\n",name,dirvp,dirinp,dentp);\
+        }\
+        cmn_err(CE_CONT, "%s: offset=%d, d_reclen=%d \"%s\"\n", name, offset,dentp->d_reclen,dentp->d_name); \
+    }                                           \
+    if(offset != dirinp->dlen){\
+        cmn_err(CE_PANIC, "%s: sum of d_reclen(%d) is not dlen(%d)\n", name, offset, dirinp->dlen); \
+    }\
+}
+
+/*
  * ファイルシステム型依存のノード情報構造体。（iノード）
  * vnode 毎（open/create 毎）に作成される。
  * next, vattr, data, dlen については初期化以降も変更される
@@ -255,7 +281,8 @@ typedef struct iumnode
 {
     struct iumnode    *next;      // iumnode 構造体のリンクリストの次の iumnode 構造体
     kmutex_t           i_lock;    // 構造体のデータの保護用のロック    
-    vnode_t           *vnode;     // 対応する vnode 構造体へのポインタ
+    vnode_t           *vnode;     // 対
+                                  // 応する vnode 構造体へのポインタ
     vattr_t            vattr;     // getattr, setattr で使われる vnode の属性情報
 #define fsize vattr.va_size
 #define iumnodeid vattr.va_nodeid    

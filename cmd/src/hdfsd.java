@@ -40,67 +40,11 @@ import java.util.logging.Logger;
  */
 public class hdfsd {
     private static Logger logger = Logger.getLogger(hdfsd.class.getName());
+    private static final int maxDaemons = 4;
 
     public static void main(String args[]) {
-        ByteBuffer rbbuf = ByteBuffer.allocate(Request.DEVICE_BUFFER_SIZE);
-        rbbuf.order(ByteOrder.nativeOrder());
-        FileInputStream devis = null;
-        FileOutputStream devos = null;
-        int len = 0;
-        Request req = null;
-        RandomAccessFile raf = null;
-
-        try {
-            raf = new RandomAccessFile("/dev/iumfscntl", "rw");
-        } catch (FileNotFoundException ex) {
-            ex.printStackTrace();
-            System.exit(1);
-        }
-        FileChannel ch = raf.getChannel();
-        logger.fine("Successfully open device.");
-
-        logger.info("Started");
-
-        while (true) {
-            try {
-                /*
-                 * iumfs デバイスからリクエストデータを読み込む
-                 */
-                rbbuf.clear();
-                if ((len = ch.read(rbbuf)) < 0) {
-                    logger.severe("read from device failed");
-                    System.exit(1);
-                }
-
-                logger.fine("device returns " + len + " bytes");
-
-                /*
-                 * リクエストオブジェクトを生成
-                 */
-                req = RequestFactory.getInstance(rbbuf);
-
-                if (req == null) {
-                    logger.severe("Request object is null");
-                    System.exit(1);
-                }
-                /*
-                 * リクエストを実行
-                 */
-                logger.fine("calling " + req.getClass().getName() + ".process()");
-                req.process();
-                /*
-                 * デバイスに書き込み
-                 */
-                ch.write(req.getResponseBuffer());
-                logger.fine("request for " + req.getClass().getName() + " finished.");
-            } catch (IOException ex) {
-                /*
-                 * ここでキャッチされるのはデバイスドライバとの read/write 処理の
-                 * IOException のみ。
-                 */
-                ex.printStackTrace();
-                System.exit(1);
-            } 
+        for(int i = 0 ; i < maxDaemons ; i++){
+            new DaemonThread().start();
         }
     }
 }            

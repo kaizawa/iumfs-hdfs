@@ -164,7 +164,7 @@ iumfscntl_attach(dev_info_t *dip, ddi_attach_cmd_t cmd)
         cntlsoft = &cntlsoft_list[instance];
         caddr_t bufaddr = kmem_zalloc(DEVICE_BUFFER_SIZE, KM_NOSLEEP);
         if (bufaddr == NULL) {
-            cmn_err(CE_CONT, "iumfscntl_open: kmem_zalloc failed");
+            cmn_err(CE_CONT, "iumfscntl_open: kmem_zalloc failed\n");
             goto err;
         }
         cntlsoft->state = 0; // フラグ初期化
@@ -173,7 +173,7 @@ iumfscntl_attach(dev_info_t *dip, ddi_attach_cmd_t cmd)
         cntlsoft->dip = dip; // dev_info 構造体. TODO: 一つしか無いのでコピーする必要は無い。
         mutex_init(&cntlsoft->d_lock, NULL, MUTEX_DRIVER, NULL);
         mutex_init(&cntlsoft->s_lock, NULL, MUTEX_DRIVER, NULL);
-        DEBUG_PRINT((CE_CONT, "iumfscntl_attach: instance=%d,initialized mutex 0x%p", instance, &cntlsoft->d_lock)); //TODO: remove
+        DEBUG_PRINT((CE_CONT, "iumfscntl_attach: instance=%d,initialized mutex 0x%p\n", instance, &cntlsoft->d_lock)); //TODO: remove
         cv_init(&cntlsoft->cv, NULL, CV_DRIVER, NULL);
     }
     iumfscntl_dev_info = dip;
@@ -219,11 +219,11 @@ iumfscntl_detach(dev_info_t *dip, ddi_detach_cmd_t cmd)
          * いるかもしれないので、フラグを解除。
          */
         if(cntlsoft->state & IUMFSCNTL_OPENED) {
-            cmn_err(CE_WARN, "iumfscntl_detach: instance %d is opened.", instance);
+            cmn_err(CE_WARN, "iumfscntl_detach: instance %d is opened.\n", instance);
         }
 
         if (cntlsoft->state & DAEMON_INPROGRESS) {
-            cmn_err(CE_WARN, "iumfscntl_detach: instance %d is inprogress.", instance);
+            cmn_err(CE_WARN, "iumfscntl_detach: instance %d is inprogress.\n", instance);
             cntlsoft->state &= ~DAEMON_INPROGRESS; // DAEMON_INPROGRESS フラグを解除
             cntlsoft->state |= BUFFER_INVALID; // マップされたアドレスのデータが不正であることを知らせる
             cntlsoft->error = EIO; // エラーをセット
@@ -287,11 +287,11 @@ iumfscntl_open(dev_t *dev, int flag, int otyp, cred_t *cred)
     }
     
     if(instance >= MAX_INST){
-        cmn_err(CE_WARN, "iumfscntl_open: all instances were in use.");        
+        cmn_err(CE_WARN, "iumfscntl_open: all instances were in use.\n");        
         err = ENXIO;        
         goto out;
     }
-    DEBUG_PRINT((CE_CONT, "iumfscntl_open: new instance = %d",instance));
+    DEBUG_PRINT((CE_CONT, "iumfscntl_open: new instance = %d\n",instance));
 
   out:
     DEBUG_PRINT((CE_CONT, "iumfscntl_open: return(%d)\n", err));
@@ -384,7 +384,7 @@ iumfscntl_read(dev_t dev, struct uio *uiop, cred_t *credp)
             goto out;
         }
     }
-    DEBUG_PRINT((CE_CONT, "iumfscntl_read: awake. new request from filesystem has come."));
+    DEBUG_PRINT((CE_CONT, "iumfscntl_read: awake. new request from filesystem has come.\n"));
 
     /*
      * デーモンの read(2) の要求サイズを超得ない範囲で request 構造体 + データ(あれば）

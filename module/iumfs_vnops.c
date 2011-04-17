@@ -568,6 +568,9 @@ iumfs_getattr(vnode_t *vp, vattr_t *vap, int flags, struct cred *cr)
      * va_vcode;     // uint_t           version code                
      */
 
+    //TODO: remove
+    cmn_err(CE_CONT, "iumfs_getattr: %s vp = 0x%p\n",inp->pathname, vp);
+    
     DEBUG_PRINT((CE_CONT, "iumfs_getattr: return(0)\n"));
     return (0);
 }
@@ -743,10 +746,10 @@ iumfs_lookup(vnode_t *dirvp, char *name, vnode_t **vpp, struct pathname *pnp,
  * を返す。
  *************************************************************************/
 static int
-iumfs_readdir(vnode_t *vp, struct uio *uiop, struct cred *cr, int *eofp)
+iumfs_readdir(vnode_t *dirvp, struct uio *uiop, struct cred *cr, int *eofp)
 {
     offset_t dent_total;
-    iumnode_t *inp;
+    iumnode_t *dirinp;
     int err;
     dirent64_t *dentp;
     offset_t offset;
@@ -758,21 +761,21 @@ iumfs_readdir(vnode_t *vp, struct uio *uiop, struct cred *cr, int *eofp)
     DEBUG_PRINT((CE_CONT, "iumfs_readdir is called.\n"));
 
     // ノードのタイプが VDIR じゃ無かったらエラーを返す
-    if (!(vp->v_type & VDIR)) {
+    if (!(dirvp->v_type & VDIR)) {
         DEBUG_PRINT((CE_CONT, "iumfs_readdir: vnode is not a directory.\n"));
         DEBUG_PRINT((CE_CONT, "iumfs_readdir: return(ENOTDIR)\n"));
         return (ENOTDIR);
     }
 
     // ファイルシステム型依存のノード構造体を得る
-    inp = VNODE2IUMNODE(vp);
+    dirinp = VNODE2IUMNODE(dirvp);
 
-    DEBUG_PRINT((CE_CONT, "iumfs_readdir: pathname=%s\n", inp->pathname));
+    DEBUG_PRINT((CE_CONT, "iumfs_readdir: pathname=%s\n", dirinp->pathname));
 
     /*
      * サーバ上のディレクトリエントリを読みにいく
      */
-    err = iumfs_request_readdir(vp);
+    err = iumfs_request_readdir(dirvp);
 
     /*
      * TODO: サーバ上のディレクトリの更新の有無によってキャッシュのエントリを返す
@@ -782,10 +785,10 @@ iumfs_readdir(vnode_t *vp, struct uio *uiop, struct cred *cr, int *eofp)
      * てしまう罠。これではディレクトリエントリの更新はされない。要検討。
      */
     /*
-     prev_mtime = inp->vattr.va_mtime.tv_sec;
+     prev_mtime = dirinp->vattr.va_mtime.tv_sec;
 
     // 最新の更新時間(mtime)を得る
-    err = iumfs_request_getattr(vp);    
+    err = iumfs_request_getattr(dirvp);    
     if(err){
         DEBUG_PRINT((CE_CONT,"iumfs_readdir: can't update latest attributes"));
         DEBUG_PRINT((CE_CONT,"iumfs_readdir: return(%d)\n",err));
@@ -796,16 +799,16 @@ iumfs_readdir(vnode_t *vp, struct uio *uiop, struct cred *cr, int *eofp)
      // o ディレクトリの更新時間が変わっている。
      // o ディレクトリの更新時間が変わっていないが現在ディレクトリは空。
 
-    if (inp->vattr.va_mtime.tv_sec != prev_mtime){
-        err = iumfs_request_readdir(vp)
-    } else if (iumfs_dir_is_empty(vp)){
-        err = iumfs_request_readdir(vp);        
+    if (dirinp->vattr.va_mtime.tv_sec != prev_mtime){
+        err = iumfs_request_readdir(dirvp)
+    } else if (iumfs_dir_is_empty(dirvp)){
+        err = iumfs_request_readdir(dirvp);        
     }
-     */
+    */
 
-    mutex_enter(&(inp->i_lock));
-
-    dent_total = inp->dlen;
+    mutex_enter(&(dirinp->i_lock));
+    DIRENT_SANITY_CHECK("iumfs_readdir",dirinp);
+    dent_total = dirinp->dlen;
 
     DEBUG_PRINT((CE_CONT, "iumfs_readdir: dent_total = %d\n", dent_total));
     DEBUG_PRINT((CE_CONT, "iumfs_readdir: uiop->uio_loffset = %d\n", uiop->uio_loffset));
@@ -815,8 +818,9 @@ iumfs_readdir(vnode_t *vp, struct uio *uiop, struct cred *cr, int *eofp)
      * ユーザが指定したオフセット(uio_loffset)から指定サイズ(uio_resid)まで
      * 範囲でのディレクトリエントリのサイズ(readsize)を計算する。
      */
-    for (offset = 0; offset < inp->dlen; offset += dentp->d_reclen) {
-        dentp = (dirent64_t *) ((char *) inp->data + offset);
+    for (offset = 0 ; offset < dirinp->dlen ; offset += dentp->d_reclen) {
+        dentp = (dirent64_t *) ((char *) dirinp->data + offset);
+
         if (!count_start) {
             if (offset >= uiop->uio_loffset) {
                 readoff = offset;
@@ -831,17 +835,17 @@ iumfs_readdir(vnode_t *vp, struct uio *uiop, struct cred *cr, int *eofp)
     }
 
     if (readsize == 0) {
-        err = uiomove(inp->data, 0, UIO_READ, uiop);
+        err = uiomove(dirinp->data, 0, UIO_READ, uiop);
         if (err == SUCCESS)
             DEBUG_PRINT((CE_CONT, "iumfs_readdir: 0 byte copied\n"));
     } else {
-        err = uiomove((caddr_t) inp->data + readoff, readsize, UIO_READ, uiop);
+        err = uiomove((caddr_t) dirinp->data + readoff, readsize, UIO_READ, uiop);
         if (err == SUCCESS)
             DEBUG_PRINT((CE_CONT, "iumfs_readdir: %d byte copied\n", readsize));
     }
-    inp->vattr.va_atime = iumfs_get_current_time();
+    dirinp->vattr.va_atime = iumfs_get_current_time();
 
-    mutex_exit(&(inp->i_lock));
+    mutex_exit(&(dirinp->i_lock));
     DEBUG_PRINT((CE_CONT, "iumfs_readdir: return(%d)\n", err));
     return (err);
 }
@@ -882,7 +886,7 @@ iumfs_inactive(vnode_t *vp, struct cred *cr)
     int err = 0;
 
     DEBUG_PRINT((CE_CONT, "iumfs_inactive is called\n"));
-
+    
     /*
      * 変更されたページのディスクへの書き込みが行う
      */

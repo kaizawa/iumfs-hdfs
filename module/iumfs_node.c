@@ -227,6 +227,9 @@ iumfs_free_node(vnode_t *vp, struct cred *cr)
 
     DEBUG_PRINT((CE_CONT, "iumfs_free_node: vp->v_count = %d\n", vp->v_count));
 
+    //TODO: remove
+    cmn_err(CE_CONT, "iumfs_free_node freeing %s vp=0x%p\n", inp->pathname,vp);
+
     /*
      * 最初にノードリンクリストから iumnode をはずす。
      * 仮に、ノードリストに入っていなかったとしても、（ありえないはずだが）
@@ -586,10 +589,11 @@ iumfs_add_entry_to_dir(vnode_t *dirvp, char *name, int name_size, ino_t nodeid)
     int err;
 
     DEBUG_PRINT((CE_CONT, "iumfs_add_entry_to_dir is called\n"));
-    DEBUG_PRINT((CE_CONT, "iumfs_add_entry_to_dir: name=\"%s\", name_size=%d, nodeid=%d\n",
-            name, name_size, nodeid));
+    DEBUG_PRINT((CE_CONT, "iumfs_add_entry_to_dir: name=\"%s\", name_size=%d, nodeid=%d\n", name, name_size, nodeid));
 
     dirinp = VNODE2IUMNODE(dirvp);
+
+    cmn_err(CE_CONT, "iumfs_add_entry_to_dir: name=\"%s\" name_size=%d, old dlen=%d, d_reclen=%d\n",name, name_size,dirinp->dlen, DIRENT64_RECLEN(name_size));//TODO: remove
 
     /*
      *  ディレクトリの iumnode のデータを変更するので、まずはロックを取得
@@ -604,6 +608,7 @@ iumfs_add_entry_to_dir(vnode_t *dirvp, char *name, int name_size, ino_t nodeid)
         dent_total = DIRENT64_RECLEN(name_size);
 
     DEBUG_PRINT((CE_CONT, "iumfs_add_entry_to_dir: dent_total=%d\n", dent_total));
+    cmn_err(CE_CONT, "iumfs_add_entry_to_dir: new dlen=%d\n", dent_total); //TODO: remove   
 
     /*
      * ディレクトリエントリ用の領域を新たに確保
@@ -647,6 +652,8 @@ iumfs_add_entry_to_dir(vnode_t *dirvp, char *name, int name_size, ino_t nodeid)
     dirinp->data = (void *) newp;
     dirinp->dlen = dent_total;
     DEBUG_PRINT((CE_CONT, "iumfs_add_entry_to_dir: new directory size=%d\n", dirinp->dlen));
+
+    DIRENT_SANITY_CHECK("iumfs_add_entry_to_dir", dirinp);    
 
     /*
      * ディレクトリのサイズも新しく確保したメモリのサイズに変更
@@ -697,6 +704,7 @@ iumfs_find_nodeid_by_name(iumnode_t *dirinp, char *name)
     DEBUG_PRINT((CE_CONT, "iumfs_find_nodeid_by_name is called\n"));
 
     mutex_enter(&(dirinp->i_lock));
+    DIRENT_SANITY_CHECK("iumfs_find_nodeid_by_name", dirinp);    
     dentp = (dirent64_t *) dirinp->data;
     /*
      * ディレクトリの中に、引数で渡されたファイル名と同じ名前のエントリ
@@ -745,6 +753,7 @@ iumfs_dir_is_empty(vnode_t *dirvp)
     dirinp = VNODE2IUMNODE(dirvp);
 
     mutex_enter(&(dirinp->i_lock));
+    DIRENT_SANITY_CHECK("iumfs_dir_is_empty", dirinp);    
     dentp = (dirent64_t *) dirinp->data;
     /*
      * ディレクトリの中に、「.」と「..」以外の名前を持ったエントリ
@@ -795,7 +804,6 @@ iumfs_remove_entry_from_dir(vnode_t *dirvp, char *name)
 {
     offset_t offset;
     iumnode_t *dirinp;
-    dirent64_t *new_dentp; // 新しいディレクトリエントリのポインタ
     dirent64_t *dentp; // 作業用ポインタ
     uchar_t *newp = NULL; // kmem_zalloc() で確保したメモリへのポインタ
     uchar_t *workp; // bcopy() でディレクトリエントリをコピーするときの作業用ポインタ
@@ -812,7 +820,7 @@ iumfs_remove_entry_from_dir(vnode_t *dirvp, char *name)
      *  ディレクトリの iumnode のデータを変更するので、まずはロックを取得
      */
     mutex_enter(&(dirinp->i_lock));
-
+    DIRENT_SANITY_CHECK("iumfs_remove_entry_from_dir(1)",dirinp);    
     dentp = (dirent64_t *) dirinp->data;
     /*
      * ディレクトリの中から引数で渡されたファイル名と同じ名前のエントリ
@@ -820,11 +828,14 @@ iumfs_remove_entry_from_dir(vnode_t *dirvp, char *name)
      */
     for (offset = 0; offset < dirinp->dlen; offset += dentp->d_reclen) {
         dentp = (dirent64_t *) ((char *) dirinp->data + offset);
+
         if (strcmp(dentp->d_name, name) == 0) {
             remove_dent_len = dentp->d_reclen;
             break;
         }
     }
+    cmn_err(CE_CONT, "iumfs_remove_entry_from_dir: \"%s\" old dlen=%d, d_reclen=%d\n", name,dirinp->dlen,remove_dent_len); //TODO: remove   
+    
     /*
      * 削除するエントリの長さが 0 だったら、それは先のループでエントリが
      * 見つけられなかったことを意味する。その場合、エラーを返す
@@ -850,6 +861,8 @@ iumfs_remove_entry_from_dir(vnode_t *dirvp, char *name)
         goto error;
     }
 
+    DIRENT_SANITY_CHECK("iumfs_remove_entry_from_dir(2)",dirinp)
+
     /*
      * 効率が悪いが、ディレクトの中のエントリをもう一度巡り、削除する
      * エントリを除く既存のエントリを、新しく確保した領域にコピーする。
@@ -868,7 +881,6 @@ iumfs_remove_entry_from_dir(vnode_t *dirvp, char *name)
     }
 
     kmem_free(dirinp->data, dirinp->dlen);
-    new_dentp = (dirent64_t *) (newp + dirinp->dlen);
 
     /*
      *  ディレクトリの iumnode の "data" が新しく確保したアドレスを
@@ -877,7 +889,7 @@ iumfs_remove_entry_from_dir(vnode_t *dirvp, char *name)
     dirinp->data = (void *) newp;
     dirinp->dlen = dent_total;
     DEBUG_PRINT((CE_CONT, "iumfs_remove_entry_from_dir: new directory size = %d\n", dirinp->dlen));
-
+    cmn_err(CE_CONT, "iumfs_remove_entry_from_dir: new dlen=%d\n", dirinp->dlen);//TODO: remove
     /*
      * ディレクトリのサイズも新しく確保したメモリのサイズに変更
      * ディレクトリの、参照時間、変更時間も変更
@@ -1205,7 +1217,7 @@ iumfs_find_parent_vnode(vnode_t *vp)
     pathname = inp->pathname;
 
     if ((ptr = strrchr(pathname, '/')) == NULL) {
-        cmn_err(CE_CONT, "iumfs_find_parent_vnode: vnode(%s) doesn have / char. \n", pathname);
+        cmn_err(CE_CONT, "iumfs_find_parent_vnode: vnode(%s) doesn have / char.\n", pathname);
         DEBUG_PRINT((CE_CONT, "iumfs_find_parent_vnode: return(NULL)\n"));
         return (vnode_t *) NULL;
     }

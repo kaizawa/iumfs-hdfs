@@ -342,13 +342,13 @@ iumfs_daemon_request_enter(iumfscntl_soft_t **cntlsoftp)
         // ロック待ちするのは使われていると思われるので次へ
         if (mutex_tryenter(&cntlsoft->s_lock) == 0)
             continue;
-        // すでにオープンされていない場合, もしくはリクエスト処理中の場合も次へ
+        // まだオープンされていない場合, もしくはリクエスト処理中の場合も次へ
         if (!(cntlsoft->state & IUMFSCNTL_OPENED) || cntlsoft->state & REQUEST_INPROGRESS ) {
             if(!cntlsoft->state & IUMFSCNTL_OPENED) {
-                DEBUG_PRINT((CE_CONT, "iumfs_daemon_request_enter: inst=%d not opened state=0x%x",instance,cntlsoft->state));
+                DEBUG_PRINT((CE_CONT, "iumfs_daemon_request_enter: inst=%d not opened. state=0x%x",instance,cntlsoft->state));
             }
             if(cntlsoft->state & REQUEST_INPROGRESS) {
-                DEBUG_PRINT((CE_CONT, "iumfs_daemon_request_enter: inst=%d in progress state=0x%x",instance,cntlsoft->state));
+                DEBUG_PRINT((CE_CONT, "iumfs_daemon_request_enter: inst=%d in progress. state=0x%x",instance,cntlsoft->state));
             }
             mutex_exit(&cntlsoft->s_lock);
             continue;
@@ -365,7 +365,7 @@ iumfs_daemon_request_enter(iumfscntl_soft_t **cntlsoftp)
      * 最初に見つかったオープン中の iumfscntl で待つ。
      */ 
     if(instance >= MAX_INST){
-        DEBUG_PRINT((CE_WARN, "iumfscntl_daemon_request_enter: all instances were in use."));        
+        DEBUG_PRINT((CE_WARN, "iumfscntl_daemon_request_enter: none of open instance is available."));        
         for (instance = 0 ; instance < MAX_INST ; instance++ ) {
             cntlsoft = &cntlsoft_list[instance];        
             mutex_enter(&cntlsoft->s_lock);
@@ -424,13 +424,6 @@ iumfs_daemon_request_enter(iumfscntl_soft_t **cntlsoftp)
     }
     *cntlsoftp = cntlsoft;
 
-    if (cntlsoftp == NULL) {
-        DEBUG_PRINT((CE_CONT, "iumfs_daemon_request_enter: cntlsoftp is null"));
-    } else {
-        DEBUG_PRINT((CE_CONT, "iumfs_daemon_request_enter: cntlsoftp = 0x%p", cntlsoftp));
-
-    }
-    
     DEBUG_PRINT((CE_CONT, "iumfs_daemon_request_enter: return(0)\n"));
     return (0);
 }
