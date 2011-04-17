@@ -52,6 +52,7 @@ class ReadDirRequest extends Request {
 
         for (FileStatus fstat : fstats) {
             int namelen = fstat.getPath().getName().getBytes().length;
+            namelen++; // null terminate 用。
 
             /*
              * 受け取り側の driver でのアライメント対策のため reclen
@@ -68,6 +69,7 @@ class ReadDirRequest extends Request {
             for (byte b : fstat.getPath().getName().getBytes()) {
                 wbbuf.put(b);
             }
+            wbbuf.put((byte)0); // null terminate           
             /*
              * Position を reclen 分だけ進めるためにパディングする
              */

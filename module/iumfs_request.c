@@ -271,7 +271,10 @@ iumfs_request_readdir(vnode_t *dirvp)
     while (offset < res->datasize) {
         name = idp->i_name;
         reclen = idp->i_reclen;
-        namelen = IUMFS_DIRENT_NAMELEN(idp->i_reclen);
+        // このマクロを使うとパディングの分もふくまれてしまう。
+        // daemon 側で null terminate するようにした。
+        //namelen = IUMFS_DIRENT_NAMELEN(idp->i_reclen);
+        namelen = strlen(idp->i_name);
 
         DEBUG_PRINT((CE_CONT, "iumfs_request_readdir: name=\"%s\",reclen=%d,namelen=%d\n", name, reclen, namelen));
 
