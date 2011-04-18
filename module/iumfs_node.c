@@ -576,7 +576,12 @@ iumfs_make_directory(vfs_t *vfsp, vnode_t **vpp, vnode_t *parentvp,
  *  戻り値
  *
  *  　　正常時   : 確保したディレクトリエントリ用のメモリのサイズ
- *      エラー時 : -1 
+ *                すでにエントリが存在しているときは 0
+ *      エラー時 : -1
+ *
+ *      
+ *      TODO: ファイルが作られるとき、どうやらこれが2かい呼ばれてしまう場合が有るようだ。
+ *            ここで重複ファイルのチェックをする。
  *
  ***********************************************************************/
 int
@@ -587,6 +592,8 @@ iumfs_add_entry_to_dir(vnode_t *dirvp, char *name, int name_size, ino_t nodeid)
     uchar_t *newp; // kmem_zalloc() で確保したメモリへのポインタ
     offset_t dent_total; // 全てのディレクトリエントリの合計サイズ
     int err;
+    offset_t offset;
+    dirent64_t *dentp;    
 
     DEBUG_PRINT((CE_CONT, "iumfs_add_entry_to_dir is called\n"));
     DEBUG_PRINT((CE_CONT, "iumfs_add_entry_to_dir: name=\"%s\", name_size=%d, nodeid=%d\n", name, name_size, nodeid));
@@ -599,6 +606,19 @@ iumfs_add_entry_to_dir(vnode_t *dirvp, char *name, int name_size, ino_t nodeid)
      *  ディレクトリの iumnode のデータを変更するので、まずはロックを取得
      */
     mutex_enter(&(dirinp->i_lock));
+    /*
+     * ディレクトリの中にすでにエントリがないかどうかをチェックする。
+     */
+    dentp = (dirent64_t *) dirinp->data;    
+    for (offset = 0; offset < dirinp->dlen; offset += dentp->d_reclen) {
+        dentp = (dirent64_t *) ((char *) dirinp->data + offset);
+        if ((strcmp(dentp->d_name, name) == 0)) {
+            // すでにエントリが存在する。
+            mutex_exit(&(dirinp->i_lock));
+            return(0);
+        }
+    }    
+
     /*
      * 確保するディレクトリエントリ分のサイズを求める
      */
