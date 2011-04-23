@@ -630,6 +630,7 @@ KCFLAGS
 LD_OPT
 DRV_DIR
 FS_DIR
+PTHREAD_CFLAGS
 LIBOBJS
 LTLIBOBJS'
 ac_subst_files=''
@@ -2746,6 +2747,9 @@ fi
 IS_GNU_LD=`ld --version 2>&1 | grep  GNU`
 if test "$GCC" = yes; then
 	CFLAGS="$CFLAGS -Wall"
+	PTHREAD_CFLAGS="-pthreads"
+else
+	PTHREAD_CFLAGS="-mt"
 fi
 
 MAJOR_VERSION=`uname -r | cut -f 1 -d .`
@@ -3494,11 +3498,12 @@ KCFLAGS!$KCFLAGS$ac_delim
 LD_OPT!$LD_OPT$ac_delim
 DRV_DIR!$DRV_DIR$ac_delim
 FS_DIR!$FS_DIR$ac_delim
+PTHREAD_CFLAGS!$PTHREAD_CFLAGS$ac_delim
 LIBOBJS!$LIBOBJS$ac_delim
 LTLIBOBJS!$LTLIBOBJS$ac_delim
 _ACEOF
 
-  if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 54; then
+  if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 55; then
     break
   elif $ac_last_try; then
     { { echo "$as_me:$LINENO: error: could not make $CONFIG_STATUS" >&5

@@ -22,6 +22,9 @@ fi
 IS_GNU_LD=`ld --version 2>&1 | grep  GNU`
 if test "$GCC" = yes; then
 	CFLAGS="$CFLAGS -Wall"
+	PTHREAD_CFLAGS="-pthreads"
+else
+	PTHREAD_CFLAGS="-mt"
 fi
 
 MAJOR_VERSION=`uname -r | cut -f 1 -d .`
@@ -78,7 +81,7 @@ AC_SUBST(LD_OPT)
 AC_SUBST(DRV_DIR)
 AC_SUBST(FS_DIR)
 AC_SUBST(CC)
-
+AC_SUBST(PTHREAD_CFLAGS)
 
 AC_CONFIG_FILES([Makefile module/Makefile testcmd/Makefile])
 AC_OUTPUT
