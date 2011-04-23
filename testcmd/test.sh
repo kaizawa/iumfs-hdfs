@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/ksh
 #
 # Copyright (C) 2010 Kazuyoshi Aizawa. All rights reserved.
 #
@@ -40,6 +40,9 @@ CLASSPATH="\
 ${HADOOP_HOME}/hadoop-common-0.21.0.jar:\
 ${HADOOP_HOME}/hadoop-hdfs-0.21.0.jar:\
 ${HADOOP_HOME}/lib/commons-logging-1.1.1.jar"
+
+procs=10 # number of processes for stress test
+wait=180 # number of seconds for streass test
 
 init (){
          LOGFILE=testcmd/test-`date '+%Y%m%d-%H:%M:%S'`.log
@@ -200,6 +203,64 @@ fini() {
         exit 0
 }
 
+do_basic_test(){
+    sleep  3 
+    echo "##"
+    echo "## Start filesystem operation test with $1 daemon."
+    echo "##"
+    exec_fstest "mkdir"
+    exec_fstest "open"
+    exec_fstest "write"
+    exec_fstest "read"
+    exec_fstest "getattr"
+    exec_fstest "readdir"
+    exec_fstest "remove"
+    exec_fstest "rmdir"
+}
+
+do_create_and_delete(){
+     filename=$RANDOM
+     cd ${mnt}
+     while :
+     do
+         echo $filename > $filename
+         rm $filename
+     done
+}
+
+do_stress_test(){
+    echo "##"
+    echo "## Start stress test"
+    echo "##"
+    pids=""
+    cnt=0
+
+    while [ $cnt -lt $procs ]
+    do
+        do_create_and_delete &
+        pids="$pids $!"
+        cnt=`expr $cnt + 1`
+    done
+
+    echo "$pids started"
+
+    ## Sleep 10 sec for complete
+    echo "Sleep $wait sec..."
+    sleep $wait
+
+    ## Kill unfinished processes
+    for pid in $pids
+    do
+        kill $pid > /dev/null 2>&1
+        #if [ $? -eq 0 ]; 
+        #then
+        #    echo "$pid terminated."
+        #fi
+    done
+    sleep 2
+    echo "Completed."
+}
+
 main() { 
     cd ../
 
@@ -227,20 +288,8 @@ main() {
         ;;
     esac
 
-    sleep  3 
-    echo "##"
-    echo "## Start filesystem operation test with $1 daemon."
-    echo "##"
-    exec_fstest "mkdir"
-    exec_fstest "open"
-    exec_fstest "write"
-    exec_fstest "read"
-    exec_fstest "getattr"
-    exec_fstest "readdir"
-    exec_fstest "remove"
-    exec_fstest "rmdir"
-    kill_daemon
-    do_umount
+    do_basic_test
+    do_stress_test
 
     fini $1
 }
