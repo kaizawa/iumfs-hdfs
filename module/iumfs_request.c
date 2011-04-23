@@ -357,7 +357,6 @@ iumfs_daemon_request_enter(iumfscntl_soft_t **cntlsoftp)
             continue;
         }
         // 開いているオープン中の iumfscntl が見つかったようだ。
-        DEBUG_PRINT((CE_CONT, "iumfs_daemon_request_enter: uses instance %d", instance));        
         cntlsoft->state |= REQUEST_INPROGRESS; // リクエスト中フラグをセット。       
         mutex_exit(&cntlsoft->s_lock);
         break;
@@ -426,6 +425,7 @@ iumfs_daemon_request_enter(iumfscntl_soft_t **cntlsoftp)
             mutex_exit(&cntlsoft->s_lock);
     }
     *cntlsoftp = cntlsoft;
+    cmn_err(CE_CONT, "iumfs_daemon_request_enter: uses instance %d", cntlsoft->instance);  
 
     DEBUG_PRINT((CE_CONT, "iumfs_daemon_request_enter: return(0)\n"));
     return (0);

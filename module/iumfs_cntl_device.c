@@ -1,3 +1,4 @@
+
 /*
  * CDDL HEADER START
  *
@@ -173,7 +174,6 @@ iumfscntl_attach(dev_info_t *dip, ddi_attach_cmd_t cmd)
         cntlsoft->dip = dip; // dev_info 構造体. TODO: 一つしか無いのでコピーする必要は無い。
         mutex_init(&cntlsoft->d_lock, NULL, MUTEX_DRIVER, NULL);
         mutex_init(&cntlsoft->s_lock, NULL, MUTEX_DRIVER, NULL);
-        DEBUG_PRINT((CE_CONT, "iumfscntl_attach: instance=%d,initialized mutex 0x%p\n", instance, &cntlsoft->d_lock)); //TODO: remove
         cv_init(&cntlsoft->cv, NULL, CV_DRIVER, NULL);
     }
     iumfscntl_dev_info = dip;

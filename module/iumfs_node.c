@@ -1110,7 +1110,6 @@ iumfs_find_vnode_by_pathname(iumfs_t *iumfsp, char *pathname)
         inp = previnp->next;
         mutex_enter(&(inp->i_lock));
         exnamelen = strlen(inp->pathname);
-
         if (exnamelen == namelen && strcmp(inp->pathname, pathname) == 0) {
             vp = IUMNODE2VNODE(inp);
             /*

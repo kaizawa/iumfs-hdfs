@@ -886,6 +886,7 @@ iumfs_inactive(vnode_t *vp, struct cred *cr)
     int err = 0;
 
     DEBUG_PRINT((CE_CONT, "iumfs_inactive is called\n"));
+    cmn_err(CE_CONT, "iumfs_inactive is called %s\n", vp->v_path);    
     
     /*
      * 変更されたページのディスクへの書き込みが行う
@@ -2070,8 +2071,8 @@ iumfs_rmdir(vnode_t *pdirvp, char *name, vnode_t *cdirvp, struct cred *cr)
      * 参照数が 1 になった段階で iumfs_inactive() が呼ばれ、iumfs_inactive()
      * から free される。
      */
+    VN_RELE(vp); //vnode 作成時に増加された参照カウント分を減らす    
     VN_RELE(vp); //iumfs_find_vnode_by_nodeid()で増やされたの参照カウント分を減らす
-    VN_RELE(vp); //vnode 作成時に増加された参照カウント分を減らす
 
   out:
     /*
