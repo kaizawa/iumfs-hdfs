@@ -248,6 +248,7 @@ typedef struct iumfs_vattr
  * ディレクトリエントリの健全性チェック。おかしければ PANIC!
  * このマクロは iumnode のロック(i_lock)を取得してから呼び出すこと!
  */
+#ifdef DEBUG
 #define DIRENT_SANITY_CHECK(name, dirinp) { \
     offset_t offset;\
     dirent64_t *dentp;\
@@ -257,12 +258,14 @@ typedef struct iumfs_vattr
         if(dentp->d_reclen == 0) {\
             cmn_err(CE_PANIC, "%s: d_reclen is 0. dirvp=0x%p,dirinp=0x%p,dentp=0x%p\n",name,dirvp,dirinp,dentp);\
         }\
-        cmn_err(CE_CONT, "%s: offset=%d, d_reclen=%d \"%s\"\n", name, offset,dentp->d_reclen,dentp->d_name); \
-    }                                           \
+    }\
     if(offset != dirinp->dlen){\
-        cmn_err(CE_PANIC, "%s: sum of d_reclen(%d) is not dlen(%d)\n", name, offset, dirinp->dlen); \
+        cmn_err(CE_PANIC, "%s: sum of d_reclen is not dlen\n", name); \
     }\
 }
+#else
+#define DIRENT_SANITY_CHECK(name, dirinp)
+#endif  // ifdef DEBUG
 
 /*
  * ファイルシステム型依存のノード情報構造体。（iノード）
