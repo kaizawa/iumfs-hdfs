@@ -41,15 +41,8 @@ ${HADOOP_HOME}/hadoop-common-0.21.0.jar:\
 ${HADOOP_HOME}/hadoop-hdfs-0.21.0.jar:\
 ${HADOOP_HOME}/lib/commons-logging-1.1.1.jar"
 
-nobuild="$1"
-
 init (){
-       if [ ! -f "${HADOOP_HOME}/hadoop-common-0.21.0.jar" ]; then
-           echo "Can't find hadoop-common-0.21.0.jar. HADOOP_HOME might not be set correctly."
-           exit 1
-       fi
-       
-        LOGFILE=testcmd/test-`date '+%Y%m%d-%H:%M:%S'`.log
+         LOGFILE=testcmd/test-`date '+%Y%m%d-%H:%M:%S'`.log
         touch $LOGFILE
 	# Just in case, umount ${mnt}
 	while : 
@@ -60,34 +53,49 @@ init (){
 		fi
 		sudo umount ${mnt} >> $LOGFILE 2>&1
 	done
-
  	# kill iumfsd fstestd
 	kill_daemon  >> $LOGFILE 2>&1
 
+        # Create mount point directory 
+	if [ ! -d "${mnt}" ]; then
+	    mkdir ${mnt}  >> $LOGFILE 2>&1
+	    if [ "$?" -ne 0 ]; then
+		echo "cannot create ${mnt}"  >> $LOGFILE 2>&1
+		fini 1
+	    fi
+	fi
+}
+
+init_fstestd(){
         echo "##"
         echo "## Preparing required directory for test."
         echo "##"
-
 	# Just in case, remove existing test dir
 	rm -rf ${base}   >> $LOGFILE 2>&1
-        hdfs dfs -rmr /var/tmp/iumfsbase  >> $LOGFILE 2>&1
-#	if [ "$?" -ne "0" ]; then
-#	    echo "Can't remove existing directory on HDFS. See $LOGFILE" 
-#	    fini 1	
-#	fi
+        # Create mount base directory 
+	if [ ! -d "${base}" ]; then
+	    mkdir ${base}  >> $LOGFILE 2>&1
+	    if [ "$?" -ne 0 ]; then
+		echo "cannot create ${base}"  >> $LOGFILE 2>&1
+		fini 1
+	    fi
+	fi
+        echo "Completed."
+}
 
-        # Create mount point and base directory 
-	for dir in ${base} ${mnt}
-	do
-		if [ ! -d "${dir}" ]; then
-			mkdir ${dir}  >> $LOGFILE 2>&1
-			if [ "$?" -ne 0 ]; then
-				echo "cannot create ${dir}"  >> $LOGFILE 2>&1
-				fini 1
-			fi
-		fi
-	done
-        hdfs dfs -mkdir /var/tmp/iumfsbase  >> $LOGFILE 2>&1
+
+init_hdfsd (){
+       if [ ! -f "${HADOOP_HOME}/hadoop-common-0.21.0.jar" ]; then
+           echo "Can't find hadoop-common-0.21.0.jar. HADOOP_HOME might not be set correctly."
+           exit 1
+       fi
+        echo "##"
+        echo "## Preparing required directory for test."
+        echo "##"
+	# Just in case, remove existing test dir
+        hdfs dfs -rmr ${base}  >> $LOGFILE 2>&1
+        # Create mount base directory 
+        hdfs dfs -mkdir ${base}  >> $LOGFILE 2>&1
 	if [ "$?" -ne "0" ]; then
 	    echo "Can't create new directory on HDFS. See $LOGFILE" 
 	    fini 1	
@@ -96,37 +104,25 @@ init (){
 }
 
 do_build(){
-        echo ""  
         echo "##"
         echo "## Start building binaries ."
         echo "##"
 	#./configure --enable-debug  >> $LOGFILE 2>&1
 	./configure # >> $LOGFILE 2>&1
 	sudo make uninstall # >> $LOGFILE 2>&1
-	make clean  #>> $LOGFILE 2>&1
-	make  #>> $LOGFILE 2>&1
-	if [ "$?" -ne "0" ]; then
-	    echo "Failed to build modules. See $LOGFILE" 
-	    exit 1	
-	fi
-	sudo make install   #>> $LOGFILE 2>&1
-	if [ "$?" -ne "0" ]; then
-	    echo "Failed to install binaries. See $LOGFILE" 
-	    exit 1
-	fi
-	(cd cmd ; ant )
-        echo "Completed." 
+	make clean  #>> $LOGFILE 2>&1do_umount() {
+	sudo umount ${mnt}  >> $LOGFILE 2>&1
+	return $?
 }
 
-
 do_mount () {
- 	sudo mount -F hdfs ${base} ${mnt} >> $LOGFILE 2>&1
-	return $?
+    sudo mount -F hdfs ${base} ${mnt} >> $LOGFILE 2>&1
+    return $?
 }
 
 do_umount() {
-	sudo umount ${mnt}  >> $LOGFILE 2>&1
-	return $?
+    sudo umount ${mnt} >> $LOGFILE 2>&1
+    return $?
 }
 
 start_fstestd() {
@@ -159,6 +155,8 @@ kill_daemon(){
 }
 
 exec_mount_test () {
+	target=$1
+
         for target in mount umount
         do
    	   cmd="do_${target}" 
@@ -186,66 +184,68 @@ exec_fstest() {
 fini() {
 	do_umount
 	kill_daemon
-	if [ -z "$nobuild" ]; then
-		sudo make uninstall >> $LOGFILE 2>&1
-		rm -rf ${mnt} >> $LOGFILE 2>&1
-		rm -rf ${base} >> $LOGFILE 2>&1
-	fi
+        case "$1" in
+            'hdfsd')
+                hdfs dfs -rmr /var/tmp/iumfsbase  >> $LOGFILE 2>&1
+                ;;
+            'fstestd')
+	        rm -rf ${base} >> $LOGFILE 2>&1
+                ;;
+        esac
+
+        rm -rf ${mnt} >> $LOGFILE 2>&1
         echo ""
         echo "Finished."
         echo "See $LOGFILE, fstestd.log and hdfsd.log under testcmd/ for detail log."
         exit 0
 }
 
+main() { 
+    cd ../
 
-cd ../
+    init
 
-if [ -z "$nobuild" ]; then
-	do_build
-fi
+    echo "##"
+    echo "## Start mount test."
+    echo "##"
+    exec_mount_test
 
-init
+    case "$1" in
+        'hdfsd')
+            init_hdfsd
+            do_mount    
+            start_hdfsd
+            ;;
+        'fstestd')
+            init_fstestd
+            do_mount
+            start_fstestd
+            ;;
+         *)
+            echo "Usage: $0 { fstestd | hdfsd }"
+            exit 1
+        ;;
+    esac
 
-echo ""
-echo "##"
-echo "## Start mount test."
-echo "##"
-exec_mount_test
+    sleep  3 
+    echo "##"
+    echo "## Start filesystem operation test with $1 daemon."
+    echo "##"
+    exec_fstest "mkdir"
+    exec_fstest "open"
+    exec_fstest "write"
+    exec_fstest "read"
+    exec_fstest "getattr"
+    exec_fstest "readdir"
+    exec_fstest "remove"
+    exec_fstest "rmdir"
+    kill_daemon
+    do_umount
 
-echo ""
-echo "##"
-echo "## Start filesystem operation test with fstestd daemon."
-echo "##"
-do_mount
-start_fstestd
-sleep  3 
-exec_fstest "mkdir"
-exec_fstest "open"
-exec_fstest "write"
-exec_fstest "read"
-exec_fstest "getattr"
-exec_fstest "readdir"
-exec_fstest "remove"
-exec_fstest "rmdir"
-kill_daemon
-do_umount
+    fini $1
+}
 
-echo ""
-echo "##"
-echo "## Start filesystem operation test with hdfsd daemon."
-echo "##"
-do_mount
-start_hdfsd
-sleep 3 
-exec_fstest "mkdir"
-exec_fstest "open"
-exec_fstest "write"
-exec_fstest "read"
-exec_fstest "getattr"
-exec_fstest "readdir"
-exec_fstest "remove"
-exec_fstest "rmdir"
+main $1
 
-fini
 
-exit
+
