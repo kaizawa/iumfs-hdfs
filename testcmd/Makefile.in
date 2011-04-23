@@ -31,7 +31,7 @@ LD = ld
 RM = rm
 
 DEFS = @DEFS@
-CFLAGS = $(DEFS) @CFLAGS@  -I ../module
+CFLAGS = $(DEFS) @CFLAGS@  -I ../module @PTHREAD_CFLAGS@
 
 PRODUCTS = fstestd fstest
 
@@ -40,7 +40,7 @@ INSTALL = @INSTALL@
 all: $(PRODUCTS)
 
 fstestd : fstestd.c ../module/iumfs.h
-	-$(CC) $(CFLAGS) fstestd.c -lsocket -lnsl -o $@
+	-$(CC) $(CFLAGS) fstestd.c -lsocket -lnsl -lpthread -o $@
 
 fstest : fstest.c ../module/iumfs.h
 	-$(CC) $(CFLAGS) fstest.c -o $@
@@ -52,4 +52,10 @@ distclean:
 	-$(RM) -f $(CONFIGURE_FILES)
 
 test:
-	./test.sh nobuild
+	./test.sh fstestd
+
+test-all:
+	./test.sh all
+
+test-hdfsd:
+	./test.sh hdfsd
