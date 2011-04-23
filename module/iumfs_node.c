@@ -227,9 +227,6 @@ iumfs_free_node(vnode_t *vp, struct cred *cr)
 
     DEBUG_PRINT((CE_CONT, "iumfs_free_node: vp->v_count = %d\n", vp->v_count));
 
-    //TODO: remove
-    cmn_err(CE_CONT, "iumfs_free_node freeing %s vp=0x%p\n", inp->pathname,vp);
-
     /*
      * 最初にノードリンクリストから iumnode をはずす。
      * 仮に、ノードリストに入っていなかったとしても、（ありえないはずだが）
@@ -579,10 +576,6 @@ iumfs_make_directory(vfs_t *vfsp, vnode_t **vpp, vnode_t *parentvp,
  *                すでにエントリが存在しているときは 0
  *      エラー時 : -1
  *
- *      
- *      TODO: ファイルが作られるとき、どうやらこれが2かい呼ばれてしまう場合が有るようだ。
- *            ここで重複ファイルのチェックをする。
- *
  ***********************************************************************/
 int
 iumfs_add_entry_to_dir(vnode_t *dirvp, char *name, int name_size, ino_t nodeid)
@@ -599,8 +592,6 @@ iumfs_add_entry_to_dir(vnode_t *dirvp, char *name, int name_size, ino_t nodeid)
     DEBUG_PRINT((CE_CONT, "iumfs_add_entry_to_dir: name=\"%s\", name_size=%d, nodeid=%d\n", name, name_size, nodeid));
 
     dirinp = VNODE2IUMNODE(dirvp);
-
-    cmn_err(CE_CONT, "iumfs_add_entry_to_dir: name=\"%s\" name_size=%d, old dlen=%d, d_reclen=%d\n",name, name_size,dirinp->dlen, DIRENT64_RECLEN(name_size));//TODO: remove
 
     /*
      *  ディレクトリの iumnode のデータを変更するので、まずはロックを取得
@@ -628,7 +619,6 @@ iumfs_add_entry_to_dir(vnode_t *dirvp, char *name, int name_size, ino_t nodeid)
         dent_total = DIRENT64_RECLEN(name_size);
 
     DEBUG_PRINT((CE_CONT, "iumfs_add_entry_to_dir: dent_total=%d\n", dent_total));
-    cmn_err(CE_CONT, "iumfs_add_entry_to_dir: new dlen=%d\n", dent_total); //TODO: remove   
 
     /*
      * ディレクトリエントリ用の領域を新たに確保
@@ -854,7 +844,6 @@ iumfs_remove_entry_from_dir(vnode_t *dirvp, char *name)
             break;
         }
     }
-    cmn_err(CE_CONT, "iumfs_remove_entry_from_dir: \"%s\" old dlen=%d, d_reclen=%d\n", name,dirinp->dlen,remove_dent_len); //TODO: remove   
     
     /*
      * 削除するエントリの長さが 0 だったら、それは先のループでエントリが
@@ -909,7 +898,6 @@ iumfs_remove_entry_from_dir(vnode_t *dirvp, char *name)
     dirinp->data = (void *) newp;
     dirinp->dlen = dent_total;
     DEBUG_PRINT((CE_CONT, "iumfs_remove_entry_from_dir: new directory size = %d\n", dirinp->dlen));
-    cmn_err(CE_CONT, "iumfs_remove_entry_from_dir: new dlen=%d\n", dirinp->dlen);//TODO: remove
     /*
      * ディレクトリのサイズも新しく確保したメモリのサイズに変更
      * ディレクトリの、参照時間、変更時間も変更

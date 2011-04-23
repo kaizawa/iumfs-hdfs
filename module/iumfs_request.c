@@ -296,7 +296,6 @@ iumfs_request_readdir(vnode_t *dirvp)
             mutex_enter(&(iumfsp->iumfs_lock));
             nodeid = ++(iumfsp->iumfs_last_nodeid);
             mutex_exit(&(iumfsp->iumfs_lock));
-            cmn_err(CE_CONT, "iumfs_request_readdir: calling iumfs_add_entry_to_dir\n"); //TODO: remove               
             iumfs_add_entry_to_dir(dirvp, name, namelen, nodeid);
         }
         offset += reclen;

@@ -456,11 +456,6 @@ out:
 /************************************************************************
  * iumfs_getattr()  VNODE オペレーション
  *
- * TODO: ここを通過した vnode が fop_getattr 内で Bad Trap で panic してしまう。
- * どうやら参照カウントが1になって iumfs_free_node が呼ばれてしまうようだ。
- * というか、 これをよぶ fop_getattr は err で返しても err 判定もせずにそのまま
- * vnode を継続使用してしまう・・・だめだこりゃ。
- *
  * GETATTR ルーチン
  *************************************************************************/
 static int
@@ -470,8 +465,6 @@ iumfs_getattr(vnode_t *vp, vattr_t *vap, int flags, struct cred *cr)
     int err;
     timestruc_t prev_mtime; // キャッシュしていた更新日時
     timestruc_t curr_mtime; // 最新の更新日時
-    vnode_t *parentvp;
-    char *name = NULL; // vnode に対応したファイルの名前
 
     DEBUG_PRINT((CE_CONT, "iumfs_getattr is called\n"));
 
@@ -489,7 +482,7 @@ iumfs_getattr(vnode_t *vp, vattr_t *vap, int flags, struct cred *cr)
     /*
      * ユーザモードデーモンに最新の属性情報を問い合わせる。
      */
-    if(err = iumfs_request_getattr(vp)){
+    if((err = iumfs_request_getattr(vp)) != 0){
         return (err);
     }
     
@@ -498,7 +491,6 @@ iumfs_getattr(vnode_t *vp, vattr_t *vap, int flags, struct cred *cr)
      * ここで参照カウント減らすと、free されて fop_getattr 内でpanic に至る。
      * しかし、じゃあだれが減らすのか?という問題も残る。
      * iumfs_request_readdir とかでサーバ側にエントリが亡くなった時点で参照カウント外すべきなのかも。。。
-     * 
      * 
     if (err && iumfs_is_root(vp) == FALSE) {
         //
@@ -583,9 +575,6 @@ iumfs_getattr(vnode_t *vp, vattr_t *vap, int flags, struct cred *cr)
      * va_vcode;     // uint_t           version code                
      */
 
-    //TODO: remove
-    cmn_err(CE_CONT, "iumfs_getattr: %s vp = 0x%p\n",inp->pathname, vp);
-    
     DEBUG_PRINT((CE_CONT, "iumfs_getattr: return(0)\n"));
     return (0);
 }
@@ -734,7 +723,6 @@ iumfs_lookup(vnode_t *dirvp, char *name, vnode_t **vpp, struct pathname *pnp,
              */
             if(foundid == 0){
                 DEBUG_PRINT((CE_CONT, "iumfs_lookup: adding entry to directory"));
-                cmn_err(CE_CONT, "iumfs_lookup: calling iumfs_add_entry_to_dir\n"); //TODO: remove
                 if (iumfs_add_entry_to_dir(dirvp, name, strlen(name), inp->vattr.va_nodeid) < 0) {
                     cmn_err(CE_CONT, "iumfs_create: cannot add new entry to directory\n");
                     err = ENOSPC;
@@ -888,11 +876,8 @@ iumfs_fsync(vnode_t *vp, int syncflag, struct cred *cr)
  * vnode の 参照数（v_count）が 0 になった場合に VFS サブシステムから
  * 呼ばれる・・と思っていたが、これが呼ばれるときは v_count はかならず 1
  * のようだ。
- *
  * v_count が 0 になるのは、iumfs_rmdir で明示的に参照数を 1 にしたときのみ。
  *
- * TODO: iumfs_inactive がまったく呼ばれない感じ？ 要チェック
- * 
  *************************************************************************/
 static void
 iumfs_inactive(vnode_t *vp, struct cred *cr)
@@ -1662,7 +1647,7 @@ out:
 /************************************************************************
  * iumfs_setattr()  VNODE オペレーション
  *
- * SETATTR ルーチン。サポートされていない。
+ * SETATTR ルーチン。サポートされていない。が、正常リターン。
  *
  *************************************************************************/
 static int
@@ -1670,7 +1655,7 @@ iumfs_setattr(vnode_t *vp, vattr_t *vap, int flags, struct cred *cr)
 {
     DEBUG_PRINT((CE_CONT, "iumfs_setattr is called\n"));
 
-    return (ENOTSUP);
+    return (0);
 }
 
 /************************************************************************
@@ -1784,7 +1769,6 @@ iumfs_create(vnode_t *dirvp, char *name, vattr_t *vap, vcexcl_t excl,
     /*
      * ディレクトリにこのファイルのエントリを追加する。
      */
-    cmn_err(CE_CONT, "iumfs_lookup: calling iumfs_add_entry_to_dir\n"); //TODO: remove   
     if (iumfs_add_entry_to_dir(dirvp, name, strlen(name),
             newinp->vattr.va_nodeid) < 0) {
         cmn_err(CE_CONT, "iumfs_create: cannot add new entry to directory\n");
@@ -1955,7 +1939,6 @@ iumfs_mkdir(vnode_t *dirvp, char *name, vattr_t *vap, vnode_t **vpp,
     /*
      * 親ディレクトリ(dirvp) に新しく作成したディレクトリのエントリを追加する。
      */
-    cmn_err(CE_CONT, "iumfs_mkdir: calling iumfs_add_entry_to_dir\n"); //TODO: remove       
     if (iumfs_add_entry_to_dir(dirvp, name, namelen, inp->vattr.va_nodeid) < 0 ){
         cmn_err(CE_CONT, "iumfs_mkdir: cannot add \"%s\" to directory\n", name);
         err = ENOSPC;
