@@ -71,3 +71,8 @@ distclean:
 test:
 	cd testcmd ; make test 
 
+test-all:
+	cd testcmd ; make test-all
+
+test-hdfsd:
+	cd testcmd ; make test-hdfsd
