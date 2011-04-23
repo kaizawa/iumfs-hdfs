@@ -40,10 +40,10 @@ import java.util.logging.Logger;
  */
 public class hdfsd {
     private static Logger logger = Logger.getLogger(hdfsd.class.getName());
-    private static final int maxDaemons = 4;
+    private static final int maxThreads = 4;
 
     public static void main(String args[]) {
-        for(int i = 0 ; i < maxDaemons ; i++){
+        for(int i = 0 ; i < maxThreads ; i++){
             new DaemonThread().start();
         }
     }
