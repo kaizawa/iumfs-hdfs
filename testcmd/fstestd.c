@@ -51,6 +51,7 @@
 #include <sys/vnode.h>
 #include <dirent.h>
 #include <stddef.h>
+#include <pthread.h>
 
 #include "iumfs.h"
 
@@ -59,6 +60,7 @@
 #define RETRY_SLEEP_SEC       1  // リトライまでの待ち時間
 #define RETRY_MAX             1  // リトライ回数
 #define FS_BLOCK_SIZE         512 // このファイルシステムのブロックサイズ
+#define MAX_THREADS           4  // /dev/iumfscntl をオープンする同時実行スレッドの数
 
 #define MAX_DIRENTS_SIZE DEVICE_BUFFER_SIZE // dirent の合計の最大サイズ
 
@@ -78,6 +80,7 @@ typedef struct testcntl {
     char *request_buffer;
     char *response_buffer;
     char *read_buffer;
+    pthread_t tid;
 } testcntl_t;
 
 /*
@@ -104,6 +107,7 @@ int process_create_request(testcntl_t *, const char *);
 int process_remove_request(testcntl_t *, const char *);
 int process_mkdir_request(testcntl_t *, const char *);
 int process_rmdir_request(testcntl_t *, const char *);
+void *request_loop(void *);
 
 int debuglevel = 0; // とりあえず デフォルトのデバッグレベルを 1 にする
 int use_syslog = 0; // メッセージを STDERR でなく、syslog に出力する
@@ -113,23 +117,12 @@ int use_syslog = 0; // メッセージを STDERR でなく、syslog に出力す
                  print_err args;\
              }    
 
-testcntl_t *gtestp;
+pthread_t tid[MAX_THREADS];      /* スレッド配列 */
 
 int
 main(int argc, char *argv[])
 {
-    testcntl_t *testp;
-    int c;
-    char pathname[IUMFS_MAXPATHLEN]; // ファイルパス
-    request_t *req;
-    int result;
-    static fd_set fds, err_fds;
-
-    testp = gtestp = (testcntl_t *) malloc(sizeof (testcntl_t));
-
-    memset(testp, 0x0, sizeof (testcntl_t));
-
-    testp->filefd = -1;
+    int c, i;
 
     while ((c = getopt(argc, argv, "d:")) != EOF) {
         switch (c) {
@@ -143,36 +136,60 @@ main(int argc, char *argv[])
         }
     }
 
+    for ( i = 0 ; i < MAX_THREADS ; i++)
+        pthread_create(&tid[i], NULL, request_loop, (void *) &tid[i]);
+    for ( i = 0 ; i < MAX_THREADS ; i++)
+        pthread_join(tid[i], NULL);
+
+    printf("All threads were terminated.\n");
+    return(1);
+}
+
+void *
+request_loop(void *arg)
+{
+    testcntl_t *testp;
+    request_t *req;
+    int result;
+    static fd_set fds, err_fds;
+    char pathname[IUMFS_MAXPATHLEN]; // ファイルパス
+    testp = (testcntl_t *) malloc(sizeof (testcntl_t));
+    memset(testp, 0x0, sizeof (testcntl_t));
+    pthread_t *tidp = (pthread_t *) arg;
+    testp->tid= *tidp;
+    
+    testp->filefd = -1;
+    
     testp->devfd = open(DEVPATH, O_RDWR, 0666);
     if (testp->devfd < 0) {
         perror("open");
-        exit(1);
+        return(NULL);
     }
-    PRINT_ERR((LOG_INFO, "main: successfully opened iumfscntl device\n"));
+    PRINT_ERR((LOG_INFO, "request_loop[%d]: successfully opened iumfscntl device\n", *tidp));
 
     /*
      * リクエスト用バッファ
      */
     if ((testp->request_buffer = (char *) malloc(MAX_REQUEST_SIZE)) == NULL) {
         perror("malloc");
-        exit(1);
+        return(NULL);
     }
     memset(testp->request_buffer, 0x0, MAX_REQUEST_SIZE);
     req = (request_t *) testp->request_buffer;
-    PRINT_ERR((LOG_INFO, "main: malloc for request__buffer succeeded\n"));
+    PRINT_ERR((LOG_INFO, "request_loop[%d]: malloc for request__buffer succeeded\n", *tidp));
 
     /*
      * レスポンス用バッファ
      */
     if ((testp->response_buffer = (char *) malloc(MAX_RESPONSE_SIZE)) == NULL) {
         perror("malloc");
-        exit(1);
+        return(NULL);
     }
     memset(testp->response_buffer, 0x0, MAX_RESPONSE_SIZE);
-    PRINT_ERR((LOG_INFO, "main: malloc for response_buffer succeeded\n"));
+    PRINT_ERR((LOG_INFO, "request_loop[%d]: malloc for response_buffer succeeded\n", *tidp));
 
     /* syslog のための設定。Facility は　LOG_USER とする */
-    openlog(basename(argv[0]), LOG_PID, LOG_USER);
+    openlog(basename("fstestd"), LOG_PID, LOG_USER);
 
     sigignore(SIGPIPE);
 
@@ -185,7 +202,7 @@ main(int argc, char *argv[])
         PRINT_ERR((LOG_INFO, "Going to background mode\n"));
         if (become_daemon() != 0) {
             print_err(LOG_ERR, "can't become daemon\n");
-            exit(1);
+            return(NULL);
         }
     }
 
@@ -204,8 +221,8 @@ main(int argc, char *argv[])
 
         ret = select(FD_SETSIZE, &fds, NULL, &err_fds, NULL);
         if (ret < 0) {
-            print_err(LOG_ERR, "main: select: %s\n", strerror(errno));
-            exit(1);
+            print_err(LOG_ERR, "request_loop[%d]: select: %s\n", *tidp,strerror(errno));
+            return(NULL);
         }
 
         /*
@@ -213,8 +230,8 @@ main(int argc, char *argv[])
          */
         ret = read(testp->devfd, req, MAX_REQUEST_SIZE);
         if (ret < sizeof (request_t)) {
-            print_err(LOG_ERR, "main: read size invalid ret(%d) < sizeof(request_t)(%d)\n",
-                      ret, sizeof (request_t));
+            print_err(LOG_ERR, "request_loop[%d]: read size invalid ret(%d) < sizeof(request_t)(%d)\n",
+                      *tidp,ret, sizeof (request_t));
             sleep(1);
             continue;
         }
@@ -222,13 +239,13 @@ main(int argc, char *argv[])
         PRINT_ERR((LOG_INFO, "==============================================\n"));
 
         if (req->mountopts->basepath == NULL)
-            PRINT_ERR((LOG_ERR, "main: req->mountopts->basepath is NULL\n"));
+            PRINT_ERR((LOG_ERR, "request_loop[%d]: req->mountopts->basepath is NULL\n", *tidp));
 
         if (req->pathname == NULL)
-            PRINT_ERR((LOG_ERR, "main: req->pathname is NULL\n"));
+            PRINT_ERR((LOG_ERR, "request_loop[%d]: req->pathname is NULL\n", *tidp));
 
-         PRINT_ERR((LOG_ERR, "main: req->mountopts->basepath=%s\n", req->mountopts->basepath));
-         PRINT_ERR((LOG_ERR, "main: req->pathname=%s\n", req->pathname));
+        PRINT_ERR((LOG_ERR, "request_loop[%d]: req->mountopts->basepath=%s\n", *tidp, req->mountopts->basepath));
+        PRINT_ERR((LOG_ERR, "request_loop[%d]: req->pathname=%s\n", *tidp, req->pathname));
         /*
          * サーバ上の実際のパス名を得る。
          * もしベースパスがルートだったら、余計な「/」はつけない。
@@ -273,14 +290,13 @@ main(int argc, char *argv[])
                 break;                                                     
             default:
                 result = ENOSYS;
-                PRINT_ERR((LOG_ERR, "main: Unknown request type 0x%x\n", req->request_type));
+                PRINT_ERR((LOG_ERR, "request_loop[%d]: Unknown request type 0x%x\n", *tidp,req->request_type));
                 write(testp->devfd, &result, sizeof (int));
                 ret = 0;
                 break;
         }
-        PRINT_ERR((LOG_INFO, "main: return: %s (%d)\n", strerror(ret), ret));        
+        PRINT_ERR((LOG_INFO, "request_loop[%d]: return: %s (%d)\n", *tidp, strerror(ret), ret));        
     } while (1);
-    exit(0);
 }
 
 /*****************************************************************************
