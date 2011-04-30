@@ -562,6 +562,8 @@ iumfs_make_directory(vfs_t *vfsp, vnode_t **vpp, vnode_t *parentvp,
  * iumfs_add_entry_to_dir()
  *
  *  ディレクトリに、引数で渡された名前の新しいエントリを追加する。
+ *  This function just calls iumfs_add_entry_to_dir_nolock after aquiring
+ *  a lock of iumnode structure.
  *
  *  引数:
  *
@@ -580,6 +582,46 @@ iumfs_make_directory(vfs_t *vfsp, vnode_t **vpp, vnode_t *parentvp,
 int
 iumfs_add_entry_to_dir(vnode_t *dirvp, char *name, int name_size, ino_t nodeid)
 {
+    int err = 0;
+    iumnode_t *dirinp;
+
+    DEBUG_PRINT((CE_CONT, "iumfs_add_entry_to_dir is called\n"));
+    dirinp = VNODE2IUMNODE(dirvp);
+    /*
+     *  ディレクトリの iumnode のデータを変更するので、まずはロックを取得
+     */
+    mutex_enter(&(dirinp->i_lock));
+    err = iumfs_add_entry_to_dir_nolock( dirvp, name, name_size, nodeid);
+    mutex_exit(&(dirinp->i_lock));
+
+    DEBUG_PRINT((CE_CONT, "iumfs_add_entry_to_dir: return(%d)", err));
+    return (err);
+}
+
+/***********************************************************************
+ * iumfs_add_entry_to_dir_nolock()
+ *
+ *  ディレクトリに、引数で渡された名前の新しいエントリを追加する。
+ *  implementation of iumfs_add_entry_to_dir().
+ *  This function must be called afer getting lock of dirinp->i_lock.
+ *
+ *  引数:
+ *
+ *     dirvp     : ディレクトリの vnode 構造体
+ *     name      : 追加するディレクトリエントリ（ファイル）の名前
+ *     name_size : ディレクトリエントリの名前の長さ。
+ *     nodeid    : 追加するディレクトリエントリのノード番号(inode番号)
+ *
+ *  戻り値
+ *
+ *  　　正常時   : 確保したディレクトリエントリ用のメモリのサイズ
+ *                すでにエントリが存在しているときは 0
+ *      エラー時 : -1
+ *
+ ***********************************************************************/
+int
+iumfs_add_entry_to_dir_nolock(vnode_t *dirvp, char *name, int name_size, ino_t nodeid)
+{
     iumnode_t *dirinp;
     dirent64_t *new_dentp; // 新しいディレクトリエントリのポインタ
     uchar_t *newp; // kmem_zalloc() で確保したメモリへのポインタ
@@ -588,15 +630,12 @@ iumfs_add_entry_to_dir(vnode_t *dirvp, char *name, int name_size, ino_t nodeid)
     offset_t offset;
     dirent64_t *dentp;    
 
-    DEBUG_PRINT((CE_CONT, "iumfs_add_entry_to_dir is called\n"));
-    DEBUG_PRINT((CE_CONT, "iumfs_add_entry_to_dir: name=\"%s\", name_size=%d, nodeid=%d\n", name, name_size, nodeid));
+    DEBUG_PRINT((CE_CONT, "iumfs_add_entry_to_dir_nolock is called\n"));
+    DEBUG_PRINT((CE_CONT, "iumfs_add_entry_to_dir_nolock: name=\"%s\", name_size=%d, nodeid=%d\n", name, name_size, nodeid));
 
     dirinp = VNODE2IUMNODE(dirvp);
+    ASSERT(mutex_owned(&(dirinp->i_lock))); // must hold the mutext before called.
 
-    /*
-     *  ディレクトリの iumnode のデータを変更するので、まずはロックを取得
-     */
-    mutex_enter(&(dirinp->i_lock));
     /*
      * ディレクトリの中にすでにエントリがないかどうかをチェックする。
      */
@@ -605,7 +644,6 @@ iumfs_add_entry_to_dir(vnode_t *dirvp, char *name, int name_size, ino_t nodeid)
         dentp = (dirent64_t *) ((char *) dirinp->data + offset);
         if ((strcmp(dentp->d_name, name) == 0)) {
             // すでにエントリが存在する。
-            mutex_exit(&(dirinp->i_lock));
             return(0);
         }
     }    
@@ -618,14 +656,14 @@ iumfs_add_entry_to_dir(vnode_t *dirvp, char *name, int name_size, ino_t nodeid)
     else
         dent_total = DIRENT64_RECLEN(name_size);
 
-    DEBUG_PRINT((CE_CONT, "iumfs_add_entry_to_dir: dent_total=%d\n", dent_total));
+    DEBUG_PRINT((CE_CONT, "iumfs_add_entry_to_dir_nolock: dent_total=%d\n", dent_total));
 
     /*
      * ディレクトリエントリ用の領域を新たに確保
      */
     newp = (uchar_t *) kmem_zalloc(dent_total, KM_NOSLEEP);
     if (newp == NULL) {
-        cmn_err(CE_CONT, "iumfs_add_entry_to_dir: kmem_zalloc failed");
+        cmn_err(CE_CONT, "iumfs_add_entry_to_dir_nolock: kmem_zalloc failed");
         err = ENOMEM;
         goto error;
     }
@@ -676,17 +714,16 @@ iumfs_add_entry_to_dir(vnode_t *dirvp, char *name, int name_size, ino_t nodeid)
     /*
      * 正常終了。最終的に確保したディレクトリエントリのサイズを返す。
      */
-    mutex_exit(&(dirinp->i_lock));
-    DEBUG_PRINT((CE_CONT, "iumfs_add_entry_to_dir: return(%d)", dent_total));
+    DEBUG_PRINT((CE_CONT, "iumfs_add_entry_to_dir_nolock: return(%d)", dent_total));
     return (dent_total);
 
 error:
     if (newp)
         kmem_free(newp, dent_total);
-    mutex_exit(&(dirinp->i_lock));
-    DEBUG_PRINT((CE_CONT, "iumfs_add_entry_to_dir: return(-1)"));
+    DEBUG_PRINT((CE_CONT, "iumfs_add_entry_to_dir_nolock: return(-1)"));
     return (-1);
 }
+
 
 /***********************************************************************
  * iumfs_find_nodeid_by_name
@@ -1139,6 +1176,7 @@ iumfs_find_vnode_by_pathname(iumfs_t *iumfsp, char *pathname)
  * iumfs_directory_entry_exist
  *
  *  ディレクトリに、引数で渡された名前のエントリがあるかどうかをチェック
+ *  Must be called after aquiring iumnode i_lock.
  *
  *  引数:
  *
@@ -1160,15 +1198,11 @@ iumfs_directory_entry_exist(vnode_t *dirvp, char *name)
     int found = 0;
 
     DEBUG_PRINT((CE_CONT, "iumfs_directory_entry_exist is called\n"));
-
     DEBUG_PRINT((CE_CONT, "iumfs_directory_entry_exist: file name = \"%s\"\n", name));
 
     dirinp = VNODE2IUMNODE(dirvp);
+    ASSERT(mutex_owned(&(dirinp->i_lock)));
 
-    /*
-     *  まずはロックを取得
-     */
-    mutex_enter(&(dirinp->i_lock));
     dentp = (dirent64_t *) dirinp->data;
     /*
      * ディレクトリの中から引数で渡されたファイル名と同じ名前のエントリを探す。
@@ -1180,7 +1214,6 @@ iumfs_directory_entry_exist(vnode_t *dirvp, char *name)
             break;
         }
     }
-    mutex_exit(&(dirinp->i_lock));
 
     if (found) {
         DEBUG_PRINT((CE_CONT, "iumfs_directory_entry_exist: return(1)\n"));

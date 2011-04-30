@@ -42,7 +42,7 @@ ${HADOOP_HOME}/hadoop-hdfs-0.21.0.jar:\
 ${HADOOP_HOME}/lib/commons-logging-1.1.1.jar"
 
 procs=10 # number of processes for stress test
-wait=180 # number of seconds for streass test
+wait=10 # number of seconds for stress test
 
 init (){
          LOGFILE=testcmd/test-`date '+%Y%m%d-%H:%M:%S'`.log
@@ -55,6 +55,10 @@ init (){
 			break
 		fi
 		sudo umount ${mnt} >> $LOGFILE 2>&1
+	        if [ "$?" -ne 0 ]; then
+			echo "cannot umount ${mnt}"  | tee >> $LOGFILE 2>&1
+			fini 1
+		fi
 	done
  	# kill iumfsd fstestd
 	kill_daemon  >> $LOGFILE 2>&1
@@ -149,7 +153,7 @@ start_hdfsd() {
 kill_daemon(){
 	pkill -KILL fstestd >> $LOGFILE 2>&1
         pid=""
-        pid=`jps |grep hdfsd | awk '{print $1}'`
+        pid=`jps 2>/dev/null |grep hdfsd | awk '{print $1}'`
         if [ "$pid" -ne "" ]; then
              kill $pid >> $LOGFILE 2>&1
         fi
@@ -185,6 +189,12 @@ exec_fstest() {
 }
 
 fini() {
+        ## Kill unfinished processes
+        for pid in $pids
+        do
+            kill $pid > /dev/null 2>&1
+        done
+
 	do_umount
 	kill_daemon
         case "$1" in
@@ -197,9 +207,13 @@ fini() {
         esac
 
         rm -rf ${mnt} >> $LOGFILE 2>&1
-        echo ""
-        echo "Finished."
-        echo "See $LOGFILE, fstestd.log and hdfsd.log under testcmd/ for detail log."
+        echo "##"
+        echo "## Finished."
+        echo "##"
+        echo "See logs under testcmd for detail."
+        echo "\t$LOGFILE"
+        echo "\ttestcmd/fstestd.log"
+        echo "\ttestcmd/hdfsd.log"
         exit 0
 }
 
@@ -235,6 +249,8 @@ do_stress_test(){
     pids=""
     cnt=0
 
+    trap fini 2 
+
     while [ $cnt -lt $procs ]
     do
         do_create_and_delete &
@@ -244,21 +260,11 @@ do_stress_test(){
 
     echo "$pids started"
 
-    ## Sleep 10 sec for complete
+    ## Sleep for complete
     echo "Sleep $wait sec..."
     sleep $wait
 
-    ## Kill unfinished processes
-    for pid in $pids
-    do
-        kill $pid > /dev/null 2>&1
-        #if [ $? -eq 0 ]; 
-        #then
-        #    echo "$pid terminated."
-        #fi
-    done
-    sleep 2
-    echo "Completed."
+    echo "stress test: \tpass" 
 }
 
 main() { 

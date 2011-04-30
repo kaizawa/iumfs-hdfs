@@ -33,7 +33,7 @@
  *   
  **************************************************************/
 /*
- * TOOD: lookup  で daemon 経由で見つかったときの dirent への追加は？
+ * TODO: lookup  で daemon 経由で見つかったときの dirent への追加は？
  */
 #include <sys/modctl.h>
 #include <sys/types.h>
@@ -462,7 +462,7 @@ static int
 iumfs_getattr(vnode_t *vp, vattr_t *vap, int flags, struct cred *cr)
 {
     iumnode_t *inp;
-    int err;
+    int err = 0;
     timestruc_t prev_mtime; // キャッシュしていた更新日時
     timestruc_t curr_mtime; // 最新の更新日時
 
@@ -482,8 +482,9 @@ iumfs_getattr(vnode_t *vp, vattr_t *vap, int flags, struct cred *cr)
     /*
      * ユーザモードデーモンに最新の属性情報を問い合わせる。
      */
+    mutex_enter(&(inp->i_lock));    
     if((err = iumfs_request_getattr(vp)) != 0){
-        return (err);
+      goto out;
     }
     
     /*
@@ -575,8 +576,10 @@ iumfs_getattr(vnode_t *vp, vattr_t *vap, int flags, struct cred *cr)
      * va_vcode;     // uint_t           version code                
      */
 
-    DEBUG_PRINT((CE_CONT, "iumfs_getattr: return(0)\n"));
-    return (0);
+ out:
+    mutex_exit(&(inp->i_lock));
+    DEBUG_PRINT((CE_CONT, "iumfs_getattr: return(%d)\n",err));
+    return (err);
 }
 
 /************************************************************************
@@ -775,6 +778,7 @@ iumfs_readdir(vnode_t *dirvp, struct uio *uiop, struct cred *cr, int *eofp)
 
     DEBUG_PRINT((CE_CONT, "iumfs_readdir: pathname=%s\n", dirinp->pathname));
 
+    mutex_enter(&(dirinp->i_lock));
     /*
      * サーバ上のディレクトリエントリを読みにいく
      */
@@ -809,7 +813,6 @@ iumfs_readdir(vnode_t *dirvp, struct uio *uiop, struct cred *cr, int *eofp)
     }
     */
 
-    mutex_enter(&(dirinp->i_lock));
     DIRENT_SANITY_CHECK("iumfs_readdir",dirinp);
     dent_total = dirinp->dlen;
 

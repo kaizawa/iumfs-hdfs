@@ -354,6 +354,7 @@ extern void iumfs_free_all_node(vfs_t *, struct cred*);
 extern int iumfs_make_directory(vfs_t *, vnode_t **, vnode_t *, struct cred *,
         ino_t);
 extern int iumfs_add_entry_to_dir(vnode_t *, char *, int, ino_t );
+extern int iumfs_add_entry_to_dir_nolock(vnode_t *, char *, int, ino_t );
 extern int iumfs_remove_entry_from_dir(vnode_t *, char *);
 extern ino_t iumfs_find_nodeid_by_name(iumnode_t *, char *);
 extern int iumfs_dir_is_empty(vnode_t *);

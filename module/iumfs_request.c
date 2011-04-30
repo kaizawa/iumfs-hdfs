@@ -291,12 +291,14 @@ iumfs_request_readdir(vnode_t *dirvp)
         /*
          * もしディレクトリに既存エントリが無ければ新しいノード番号を
          * 割当てた上で読み込んだエントリを追加。
+         * lock for iumnode has already been aquired, so it calls no lock version of 
+         * iumfs_add_entry_to_dir.
          */
         if (!iumfs_directory_entry_exist(dirvp, name)) {
             mutex_enter(&(iumfsp->iumfs_lock));
             nodeid = ++(iumfsp->iumfs_last_nodeid);
             mutex_exit(&(iumfsp->iumfs_lock));
-            iumfs_add_entry_to_dir(dirvp, name, namelen, nodeid);
+            iumfs_add_entry_to_dir_nolock(dirvp, name, namelen, nodeid);
         }
         offset += reclen;
         idp = (iumfs_dirent_t *) ((char *) idp + reclen);
@@ -740,21 +742,19 @@ iumfs_request_getattr(vnode_t *vp)
     ivap = (iumfs_vattr_t *) ((char *) res + sizeof (response_t));
     DEBUG_PRINT((CE_CONT, "iumfs_request_getattr: i_type=%ld, i_mode=%ld, i_size=%ld\n",
             ivap->i_type, ivap->i_mode, ivap->i_size));
-    mutex_enter(&(inp->i_lock));
     inp->vattr.va_mode = ivap->i_mode;
     inp->vattr.va_size = ivap->i_size;
     inp->vattr.va_type = ivap->i_type;
     inp->vattr.va_mtime.tv_sec = ivap->mtime_sec;
     inp->vattr.va_mtime.tv_nsec = ivap->mtime_nsec;
-    mutex_exit(&(inp->i_lock));
     mutex_exit(&cntlsoft->d_lock);
 
     /*
      * リクエストを解除。他の待ち thread を起こす
      */
     iumfs_daemon_request_exit(cntlsoft);
-
     DEBUG_PRINT((CE_CONT, "iumfs_request_getattr: copy data done\n"));
+
 out:
     DEBUG_PRINT((CE_CONT, "iumfs_request_getattr: return(%d)\n", err));
     return (err);
