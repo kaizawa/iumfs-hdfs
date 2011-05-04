@@ -225,7 +225,7 @@ iumfs_free_node(vnode_t *vp, struct cred *cr)
     vfsp = VNODE2VFS(vp);
     inp = VNODE2IUMNODE(vp);
 
-    DEBUG_PRINT((CE_CONT, "iumfs_free_node: vp->v_count = %d\n", vp->v_count));
+    DEBUG_PRINT((CE_CONT, "iumfs_free_node: vnode=%p, vp->v_count=%d\n", vp, vp->v_count));
 
     /*
      * 最初にノードリンクリストから iumnode をはずす。

@@ -26,12 +26,12 @@
 #
 
 #
-# CreateRequest.java
-#
 # Test script of iumfs filesystem
 # After build iumfs, run this script.
 # You will be prompted password for root user.
 #
+procs=1 # number of processes for stress test
+stresstime=60000 # number of seconds for stress test
 daemonpid=""
 mnt="/var/tmp/iumfsmnt"
 base="/var/tmp/iumfsbase"
@@ -41,8 +41,6 @@ ${HADOOP_HOME}/hadoop-common-0.21.0.jar:\
 ${HADOOP_HOME}/hadoop-hdfs-0.21.0.jar:\
 ${HADOOP_HOME}/lib/commons-logging-1.1.1.jar"
 
-procs=10 # number of processes for stress test
-wait=10 # number of seconds for stress test
 
 init (){
          LOGFILE=testcmd/test-`date '+%Y%m%d-%H:%M:%S'`.log
@@ -151,11 +149,11 @@ start_hdfsd() {
 }
 
 kill_daemon(){
-	pkill -KILL fstestd >> $LOGFILE 2>&1
+	sudo pkill -KILL fstestd >> $LOGFILE 2>&1
         pid=""
         pid=`jps 2>/dev/null |grep hdfsd | awk '{print $1}'`
         if [ "$pid" -ne "" ]; then
-             kill $pid >> $LOGFILE 2>&1
+             sudo kill $pid >> $LOGFILE 2>&1
         fi
 	daemonpid=""
 	return 0
@@ -194,7 +192,7 @@ fini() {
         do
             kill $pid > /dev/null 2>&1
         done
-
+	sleep 1
 	do_umount
 	kill_daemon
         case "$1" in
@@ -205,8 +203,7 @@ fini() {
 	        rm -rf ${base} >> $LOGFILE 2>&1
                 ;;
         esac
-
-        rm -rf ${mnt} >> $LOGFILE 2>&1
+        #rm -rf ${mnt} >> $LOGFILE 2>&1
         echo "##"
         echo "## Finished."
         echo "##"
@@ -238,7 +235,15 @@ do_create_and_delete(){
      while :
      do
          echo $filename > $filename
+	 if [ "$?" -ne 0 ]; then
+	     echo "do_create_and_delete: cannot create $filenme." | tee >> $LOGFILE 2>&1
+             continue
+	 fi
          rm $filename
+	 if [ "$?" -ne 0 ]; then
+	     echo "do_create_and_delete: cannot remove $filenme." | tee >> $LOGFILE 2>&1
+             continue
+	 fi
      done
 }
 
@@ -261,8 +266,8 @@ do_stress_test(){
     echo "$pids started"
 
     ## Sleep for complete
-    echo "Sleep $wait sec..."
-    sleep $wait
+    echo "Sleep $stresstime sec..."
+    sleep $stresstime
 
     echo "stress test: \tpass" 
 }
