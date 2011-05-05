@@ -656,14 +656,16 @@ iumfs_lookup(vnode_t *dirvp, char *name, vnode_t **vpp, struct pathname *pnp,
     DEBUG_PRINT((CE_CONT, "iumfs_lookup: pathname=\"%s\"\n", pathname));
 
     foundid = iumfs_find_nodeid_by_name(dirinp, name);
+    /*
     if (foundid == 0) {
-        /*
-         * ディレクトリエントリの中に該当するファイルが見つらなかった。
-         * readdir されていない（既知でない）エントリの場合ここに来る。
-         */
+        //
+        // ディレクトリエントリの中に該当するファイルが見つらなかった。
+        // readdir されていない（既知でない）エントリの場合ここに来る。
+        //
         DEBUG_PRINT((CE_CONT, "iumfs_lookup: can't get node id of \"%s\" in existing dir entry\n", name));
         vp = iumfs_find_vnode_by_pathname(iumfsp, pathname);
-    } else {
+    */
+    if(foundid != 0) {
         /*
          * ディレクトリエントリの中に該当するファイルが見つかった。
          */
