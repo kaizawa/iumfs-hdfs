@@ -2,6 +2,9 @@
 
 main(){
      filename=$RANDOM
+     if [  -n "$1" ]; then
+        cd $1
+     fi
      while :
      do
          echo $filename > $filename
@@ -19,4 +22,4 @@ main(){
      done
 }
 
-main
+main $1

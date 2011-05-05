@@ -135,13 +135,14 @@ iumfs_alloc_node(vfs_t *vfsp, vnode_t **nvpp, uint_t flag, enum vtype type, ino_
     /*
      * 確保した iumnode を初期化 (IN_INIT マクロは使わない）
      */
-    mutex_init(&(inp)->i_lock, NULL, MUTEX_DEFAULT, NULL);
+    mutex_init(&(inp)->i_dlock, NULL, MUTEX_DEFAULT, NULL);
     inp->vattr.va_mask = AT_ALL;
     inp->vattr.va_uid = 0;
     inp->vattr.va_gid = 0;
     inp->vattr.va_blksize = BLOCKSIZE;
     inp->vattr.va_nlink = 1;
     inp->vattr.va_rdev = 0;
+    rw_init(&(inp)->i_listlock,NULL,RW_DRIVER,NULL);
 #ifdef SOL10
 #else    
     inp->vattr.va_vcode = 1;
@@ -228,12 +229,14 @@ iumfs_free_node(vnode_t *vp, struct cred *cr)
     DEBUG_PRINT((CE_CONT, "iumfs_free_node: vnode=%p, vp->v_count=%d\n", vp, vp->v_count));
 
     /*
-     * 最初にノードリンクリストから iumnode をはずす。
-     * 仮に、ノードリストに入っていなかったとしても、（ありえないはずだが）
-     * vnode のフリーは行う。
+     * 最初にノードリンクリストから iumnode をはずす。誰かが利用中(EBUSY)だったらリターン。
+     * 仮にノードリストに入っていなかったとしても、（ありえないはずだが) vnode のフリーは行う。
      */
-    if (iumfs_remove_node_from_list(vfsp, vp) != 0) {
-        cmn_err(CE_CONT, "iumfs_free_node: can't find vnode in the list. Free it anyway.\n");
+    if((err = iumfs_remove_node_from_list(vfsp, vp)) != 0){
+        if (err == ENOENT)
+            cmn_err(CE_CONT, "iumfs_free_node: can't find vnode in the list. Free it anyway.\n");
+        else
+            return;
     }
 
     // debug 用
@@ -260,7 +263,8 @@ iumfs_free_node(vnode_t *vp, struct cred *cr)
     DEBUG_PRINT((CE_CONT, "iumfs_free_node: pvn_vplist_dirty returned with (%d)\n", err));
 
     // iumnode を解放
-    mutex_destroy(&(inp)->i_lock);
+    mutex_destroy(&(inp)->i_dlock);
+    rw_destroy(&(inp)->i_listlock);
     kmem_free(inp, sizeof (iumnode_t));
 
     // vnode を解放
@@ -362,15 +366,15 @@ iumfs_add_node_to_list(vfs_t *vfsp, vnode_t *newvp)
     headinp = &iumfsp->node_list_head;
 
     previnp = headinp;
-    mutex_enter(&(previnp->i_lock));
+    rw_enter(&(previnp->i_listlock),RW_WRITER);
     while (previnp->next != NULL) {
         inp = previnp->next;
-        mutex_enter(&(inp->i_lock));
-        mutex_exit(&(previnp->i_lock));
+        rw_enter(&(inp->i_listlock),RW_WRITER);
+        rw_exit(&(previnp->i_listlock));
         previnp = inp;
     }
     previnp->next = newinp;
-    mutex_exit(&(previnp->i_lock));
+    rw_exit(&(previnp->i_listlock));
     DEBUG_PRINT((CE_CONT, "iumfs_add_node_to_list: return(%d)\n", SUCCESS));
     return (SUCCESS);
 }
@@ -397,6 +401,7 @@ iumfs_remove_node_from_list(vfs_t *vfsp, vnode_t *rmvp)
     iumnode_t *inp; // 操作用のノード情報のポインタ
     iumnode_t *previnp; // 操作用のノード情報のポインタ
     iumfs_t *iumfsp; // ファイルシステム型依存のプライベートデータ構造体
+    int err = 0;
 
     DEBUG_PRINT((CE_CONT, "iumfs_remove_node_from_list called\n"));
 
@@ -405,26 +410,38 @@ iumfs_remove_node_from_list(vfs_t *vfsp, vnode_t *rmvp)
     headinp = &iumfsp->node_list_head;
 
     previnp = headinp;
-    mutex_enter(&(previnp->i_lock));
-
+    rw_enter(&(previnp->i_listlock),RW_WRITER);
     while (previnp->next) {
         inp = previnp->next;
-        mutex_enter(&(inp->i_lock));
+        rw_enter(&(inp->i_listlock),RW_WRITER);
         if (inp == rminp) {
+            mutex_enter(&rmvp->v_lock);
+            if(rmvp->v_count > 1){
+                // ここまで来る間に他のスレッドでこのノードの参照を開始したようだ。
+                // vn_rele で増加された参照カウントを減らしてリターン
+                rmvp->v_count--;
+                mutex_exit(&(rmvp->v_lock));
+                rw_exit(&(inp->i_listlock));
+                rw_exit(&(previnp->i_listlock));
+                err = EBUSY;
+                goto out;
+            }
             previnp->next = inp->next;
-            mutex_exit(&(inp->i_lock));
-            mutex_exit(&(previnp->i_lock));
-            DEBUG_PRINT((CE_CONT, "iumfs_remove_node_from_list: return(%d)\n", SUCCESS));
-            return (SUCCESS);
+            rw_exit(&(inp->i_listlock));
+            rw_exit(&(previnp->i_listlock));
+            err = SUCCESS;
+            goto out;
         }
-        mutex_exit(&(previnp->i_lock));
+        rw_exit(&(previnp->i_listlock));
         previnp = inp;
     }
-    mutex_exit(&(previnp->i_lock));
-
+    rw_exit(&(previnp->i_listlock));
+    err = ENOENT;
     cmn_err(CE_CONT, "iumfs_remove_node_from_list: cannot find node\n");
-    DEBUG_PRINT((CE_CONT, "iumfs_remove_node_from_list: return(ENOENT)\n"));
-    return (ENOENT);
+    
+  out:
+    DEBUG_PRINT((CE_CONT, "iumfs_remove_node_from_list: return(%d)\n", err));
+    return (err);
 }
 
 /*****************************************************************************
@@ -590,9 +607,9 @@ iumfs_add_entry_to_dir(vnode_t *dirvp, char *name, int name_size, ino_t nodeid)
     /*
      *  ディレクトリの iumnode のデータを変更するので、まずはロックを取得
      */
-    mutex_enter(&(dirinp->i_lock));
+    mutex_enter(&(dirinp->i_dlock));
     err = iumfs_add_entry_to_dir_nolock( dirvp, name, name_size, nodeid);
-    mutex_exit(&(dirinp->i_lock));
+    mutex_exit(&(dirinp->i_dlock));
 
     DEBUG_PRINT((CE_CONT, "iumfs_add_entry_to_dir: return(%d)", err));
     return (err);
@@ -603,7 +620,7 @@ iumfs_add_entry_to_dir(vnode_t *dirvp, char *name, int name_size, ino_t nodeid)
  *
  *  ディレクトリに、引数で渡された名前の新しいエントリを追加する。
  *  implementation of iumfs_add_entry_to_dir().
- *  This function must be called afer getting lock of dirinp->i_lock.
+ *  This function must be called afer getting lock of dirinp->i_dlock.
  *
  *  引数:
  *
@@ -634,7 +651,7 @@ iumfs_add_entry_to_dir_nolock(vnode_t *dirvp, char *name, int name_size, ino_t n
     DEBUG_PRINT((CE_CONT, "iumfs_add_entry_to_dir_nolock: name=\"%s\", name_size=%d, nodeid=%d\n", name, name_size, nodeid));
 
     dirinp = VNODE2IUMNODE(dirvp);
-    ASSERT(mutex_owned(&(dirinp->i_lock))); // must hold the mutext before called.
+    ASSERT(mutex_owned(&(dirinp->i_dlock))); // must hold the mutext before called.
 
     /*
      * ディレクトリの中にすでにエントリがないかどうかをチェックする。
@@ -750,7 +767,7 @@ iumfs_find_nodeid_by_name(iumnode_t *dirinp, char *name)
 
     DEBUG_PRINT((CE_CONT, "iumfs_find_nodeid_by_name is called\n"));
 
-    mutex_enter(&(dirinp->i_lock));
+    mutex_enter(&(dirinp->i_dlock));
     DIRENT_SANITY_CHECK("iumfs_find_nodeid_by_name", dirinp);    
     dentp = (dirent64_t *) dirinp->data;
     /*
@@ -766,7 +783,7 @@ iumfs_find_nodeid_by_name(iumnode_t *dirinp, char *name)
             break;
         }
     }
-    mutex_exit(&(dirinp->i_lock));
+    mutex_exit(&(dirinp->i_dlock));
     DEBUG_PRINT((CE_CONT, "iumfs_find_nodeid_by_name return(%d)\n", nodeid));
     return (nodeid);
 }
@@ -799,7 +816,7 @@ iumfs_dir_is_empty(vnode_t *dirvp)
 
     dirinp = VNODE2IUMNODE(dirvp);
 
-    mutex_enter(&(dirinp->i_lock));
+    mutex_enter(&(dirinp->i_dlock));
     DIRENT_SANITY_CHECK("iumfs_dir_is_empty", dirinp);    
     dentp = (dirent64_t *) dirinp->data;
     /*
@@ -819,7 +836,7 @@ iumfs_dir_is_empty(vnode_t *dirvp)
         DEBUG_PRINT((CE_CONT, "iumfs_dir_is_empty: found \"%s\"\n", dentp->d_name));
         break;
     }
-    mutex_exit(&(dirinp->i_lock));
+    mutex_exit(&(dirinp->i_dlock));
 
     if (found) {
         DEBUG_PRINT((CE_CONT, "iumfs_dir_is_empty: return(FALSE)\n"));
@@ -866,7 +883,7 @@ iumfs_remove_entry_from_dir(vnode_t *dirvp, char *name)
     /*
      *  ディレクトリの iumnode のデータを変更するので、まずはロックを取得
      */
-    mutex_enter(&(dirinp->i_lock));
+    mutex_enter(&(dirinp->i_dlock));
     DIRENT_SANITY_CHECK("iumfs_remove_entry_from_dir(1)",dirinp);    
     dentp = (dirent64_t *) dirinp->data;
     /*
@@ -946,14 +963,14 @@ iumfs_remove_entry_from_dir(vnode_t *dirvp, char *name)
     /*
      * 正常終了。最終的に確保したディレクトリエントリのサイズを返す。
      */
-    mutex_exit(&(dirinp->i_lock));
+    mutex_exit(&(dirinp->i_dlock));
     DEBUG_PRINT((CE_CONT, "iumfs_remove_entry_from_dir: return(%d)\n", dent_total));
     return (dent_total);
 
 error:
     if (newp)
         kmem_free(newp, dent_total);
-    mutex_exit(&(dirinp->i_lock));
+    mutex_exit(&(dirinp->i_dlock));
     DEBUG_PRINT((CE_CONT, "iumfs_remove_entry_from_dir: return(-1)\n"));
     return (-1);
 }
@@ -989,10 +1006,10 @@ iumfs_find_vnode_by_nodeid(iumfs_t *iumfsp, ino_t nodeid)
      * ノードのリンクリストの中から該当する nodeid のものを探す。
      */
     previnp = headinp;
-    mutex_enter(&(previnp->i_lock));
+    rw_enter(&(previnp->i_listlock),RW_READER);
     while (previnp->next) {
         inp = previnp->next;
-        mutex_enter(&(inp->i_lock));
+        rw_enter(&(inp->i_listlock),RW_READER);
         if (inp->vattr.va_nodeid == nodeid) {
             vp = IUMNODE2VNODE(inp);
             /*
@@ -1002,13 +1019,13 @@ iumfs_find_vnode_by_nodeid(iumfs_t *iumfsp, ino_t nodeid)
              */
             VN_HOLD(vp);
             DEBUG_PRINT((CE_CONT, "iumfs_find_vnode_by_nodeid: found vnode 0x%p\n", vp));
-            mutex_exit(&(inp->i_lock));
+            rw_exit(&(inp->i_listlock));
             break;
         }
-        mutex_exit(&(previnp->i_lock));
+        rw_exit(&(previnp->i_listlock));
         previnp = inp;
     }
-    mutex_exit(&(previnp->i_lock));
+    rw_exit(&(previnp->i_listlock));
 
 #ifdef DEBUG    
     if (vp == NULL)
@@ -1142,10 +1159,10 @@ iumfs_find_vnode_by_pathname(iumfs_t *iumfsp, char *pathname)
      * ノードのリンクリストの中からパス名が一致するものを探す
      */
     previnp = headinp;
-    mutex_enter(&(previnp->i_lock));
+    rw_enter(&(previnp->i_listlock),RW_READER);
     while (previnp->next) {
         inp = previnp->next;
-        mutex_enter(&(inp->i_lock));
+        rw_enter(&(inp->i_listlock),RW_READER);
         exnamelen = strlen(inp->pathname);
         if (exnamelen == namelen && strcmp(inp->pathname, pathname) == 0) {
             vp = IUMNODE2VNODE(inp);
@@ -1156,13 +1173,13 @@ iumfs_find_vnode_by_pathname(iumfs_t *iumfsp, char *pathname)
              */
             VN_HOLD(vp);
             DEBUG_PRINT((CE_CONT, "iumfs_find_vnode_by_pathname: found vnode 0x%p\n", vp));
-            mutex_exit(&(inp->i_lock));
+            rw_exit(&(inp->i_listlock));
             break;
         }
-        mutex_exit(&(previnp->i_lock));
+        rw_exit(&(previnp->i_listlock));
         previnp = inp;
     }
-    mutex_exit(&(previnp->i_lock));
+    rw_exit(&(previnp->i_listlock));
 
 #ifdef DEBUG    
     if (vp == NULL)
@@ -1176,7 +1193,7 @@ iumfs_find_vnode_by_pathname(iumfs_t *iumfsp, char *pathname)
  * iumfs_directory_entry_exist
  *
  *  ディレクトリに、引数で渡された名前のエントリがあるかどうかをチェック
- *  Must be called after aquiring iumnode i_lock.
+ *  Must be called after aquiring iumnode i_dlock.
  *
  *  引数:
  *
@@ -1201,7 +1218,7 @@ iumfs_directory_entry_exist(vnode_t *dirvp, char *name)
     DEBUG_PRINT((CE_CONT, "iumfs_directory_entry_exist: file name = \"%s\"\n", name));
 
     dirinp = VNODE2IUMNODE(dirvp);
-    ASSERT(mutex_owned(&(dirinp->i_lock)));
+    ASSERT(mutex_owned(&(dirinp->i_dlock)));
 
     dentp = (dirent64_t *) dirinp->data;
     /*

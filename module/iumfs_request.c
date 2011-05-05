@@ -452,6 +452,8 @@ int
 iumfs_daemon_request_start(iumfscntl_soft_t *cntlsoft)
 {
     int err;
+    int ret;
+    int retrans = 0;
 
     DEBUG_PRINT((CE_CONT, "iumfs_daemon_request_start called\n"));
 
@@ -476,7 +478,13 @@ iumfs_daemon_request_start(iumfscntl_soft_t *cntlsoft)
     mutex_enter(&cntlsoft->s_lock);
     while (cntlsoft->state & DAEMON_INPROGRESS) {
         DEBUG_PRINT((CE_CONT, "iumfs_daemon_request_start: waiting for data from daemon(state = 0x%x)\n", cntlsoft->state));
-        if (cv_wait_sig(&cntlsoft->cv, &cntlsoft->s_lock) == 0) {
+        if ((ret = cv_timedwait_sig(&cntlsoft->cv, &cntlsoft->s_lock, ddi_get_lbolt() + DAEMON_TIMEOUT_TICK)) < 0) {
+            // タイムアウト
+            retrans++;                
+            pollwakeup(&cntlsoft->pollhead, POLLERR | POLLRDBAND);
+            cmn_err(CE_CONT, "daemon not responding. still trying. retrans=%d\n", retrans);
+            continue;
+        } else if (ret == 0) {
             /*
              * 割り込みを受けた。 EINTR を返す。
              * daemon に対しても POLLERR | POLLRDBAND で通知する。

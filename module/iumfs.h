@@ -33,6 +33,8 @@
  *
  *************************************************************/
 
+#include <sys/time.h>
+
 #ifndef __IUMFS_H
 #define __IUMFS_H
 
@@ -166,6 +168,8 @@ typedef struct iumfs_vattr
 #define MAXNAMLEN       255     // 最大ファイル名長
 #define BLOCKSIZE       512     // iumfs ファイルシステムのブロックサイズ
 #define MAX_INST         10     // iumfscntl の最大インスタンス数
+#define DAEMON_TIMEOUT   10     // daemon からのリクエストを待つ時間(秒)
+#define DAEMON_TIMEOUT_TICK SEC_TO_TICK(DAEMON_TIMEOUT)
 
 /*
  * 以下の2つのマクロは MINOR デバイス番号 0 をつかってはだめ
@@ -213,7 +217,7 @@ typedef struct iumfs_vattr
 #define VNODE2IUMFS(vp)     (VFS2IUMFS(VNODE2VFS((vp))))
 #define VNODE2ROOT(vp)      (VNODE2IUMFS((vp))->rootvnode)
 #define IN_INIT(inp) {\
-              mutex_init(&(inp)->i_lock, NULL, MUTEX_DEFAULT, NULL);\
+              mutex_init(&(inp)->i_dlock, NULL, MUTEX_DEFAULT, NULL);\
               inp->vattr.va_uid      = 0;\
               inp->vattr.va_gid      = 0;\
               inp->vattr.va_blksize  = BLOCKSIZE;\
@@ -246,7 +250,7 @@ typedef struct iumfs_vattr
 
 /*
  * ディレクトリエントリの健全性チェック。おかしければ PANIC!
- * このマクロは iumnode のロック(i_lock)を取得してから呼び出すこと!
+ * このマクロは iumnode のロック(i_dlock)を取得してから呼び出すこと!
  */
 #ifdef DEBUG
 #define DIRENT_SANITY_CHECK(name, dirinp) { \
@@ -271,7 +275,7 @@ typedef struct iumfs_vattr
  * ファイルシステム型依存のノード情報構造体。（iノード）
  * vnode 毎（open/create 毎）に作成される。
  * next, vattr, data, dlen については初期化以降も変更される
- * 可能性があるため、参照時にはロック(i_lock)をとらなければ
+ * 可能性があるため、参照時にはロック(i_dlock)をとらなければ
  * ならない。
  * pathname はこのノードに対応するファイルのファイルシステムルート  
  * からの相対パス名をあらわす。本来ファイル名はディレクトリにのみ  
@@ -283,7 +287,8 @@ typedef struct iumfs_vattr
 typedef struct iumnode
 {
     struct iumnode    *next;      // iumnode 構造体のリンクリストの次の iumnode 構造体
-    kmutex_t           i_lock;    // 構造体のデータの保護用のロック    
+    kmutex_t           i_dlock;   // 構造体のデータの保護用のロック  
+    krwlock_t          i_listlock;// ノードリスト巡回時に使う next ポインタ用の rwlock
     vnode_t           *vnode;     // 対
                                   // 応する vnode 構造体へのポインタ
     vattr_t            vattr;     // getattr, setattr で使われる vnode の属性情報

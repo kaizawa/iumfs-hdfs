@@ -30,8 +30,8 @@
 # After build iumfs, run this script.
 # You will be prompted password for root user.
 #
-procs=1 # number of processes for stress test
-stresstime=60000 # number of seconds for stress test
+procs=5 # number of processes for stress test
+stresstime=60 # number of seconds for stress test
 daemonpid=""
 mnt="/var/tmp/iumfsmnt"
 base="/var/tmp/iumfsbase"

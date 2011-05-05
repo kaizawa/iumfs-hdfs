@@ -383,7 +383,7 @@ iumfs_mount(vfs_t *vfsp, vnode_t *mvnode, struct mounta *mntarg,
          * ロックを初期化
          */
         mutex_init(&(iumfsp->iumfs_lock), NULL, MUTEX_DEFAULT, NULL);
-        mutex_init(&(iumfsp->node_list_head.i_lock), NULL, MUTEX_DEFAULT, NULL);
+        mutex_init(&(iumfsp->node_list_head.i_dlock), NULL, MUTEX_DEFAULT, NULL);
 
         /*
          * vfs 構造体にファイルシステムのプライベートデータ構造体をセット
@@ -432,7 +432,7 @@ iumfs_mount(vfs_t *vfsp, vnode_t *mvnode, struct mounta *mntarg,
             }
             // ロックを削除し、確保したメモリを開放
             mutex_destroy(&(iumfsp->iumfs_lock));
-            mutex_destroy(&(iumfsp->node_list_head.i_lock));
+            mutex_destroy(&(iumfsp->node_list_head.i_dlock));
             kmem_free(iumfsp, sizeof (iumfs_t));
             vfsp->vfs_data = (char *) NULL;
         }
@@ -464,25 +464,25 @@ iumfs_unmount(vfs_t *vfsp, int val, struct cred *cr)
      * しまうのを避けるための動作）
      */
     previnp = &iumfsp->node_list_head;
-    mutex_enter(&(previnp->i_lock));
+    mutex_enter(&(previnp->i_dlock));
     while (previnp->next) {
         inp = previnp->next;
-        mutex_enter(&(inp->i_lock));
+        mutex_enter(&(inp->i_dlock));
         vp = IUMNODE2VNODE(inp);
         if (vp->v_count != 1) {
             /*
              * まだ利用されている vnode がある、ロックを開放し、EBUSY を返す。
              */
             DEBUG_PRINT((CE_CONT, "iumfs_unmount: %s vp->v_count = %d\n", inp->pathname, vp->v_count));
-            mutex_exit(&(inp->i_lock));
-            mutex_exit(&(previnp->i_lock));
+            mutex_exit(&(inp->i_dlock));
+            mutex_exit(&(previnp->i_dlock));
             DEBUG_PRINT((CE_CONT, "iumfs_unmount: return(EBUSY)\n"));
             return (EBUSY);
         }
-        mutex_exit(&(previnp->i_lock));
+        mutex_exit(&(previnp->i_dlock));
         previnp = inp;
     }
-    mutex_exit(&(previnp->i_lock));
+    mutex_exit(&(previnp->i_dlock));
 
     /*
      * 全ての vnode が利用されていないのが分かった。

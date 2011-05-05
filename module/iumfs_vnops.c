@@ -59,6 +59,7 @@
 #include <sys/uio.h>
 #include <sys/vm.h>
 #include <sys/exec.h>
+#include <sys/ksynch.h>
 
 #include "iumfs.h"
 
@@ -344,7 +345,7 @@ iumfs_read(vnode_t *vp, struct uio *uiop, int ioflag, struct cred *cr)
     // ファイルシステム型依存のノード構造体を得る
     inp = VNODE2IUMNODE(vp);
 
-    mutex_enter(&(inp->i_lock));
+    mutex_enter(&(inp->i_dlock));
 
     if (!(inp->vattr.va_type | VREG)) {
         DEBUG_PRINT((CE_CONT, "iumfs_read: file is not regurar file\n"));
@@ -448,7 +449,7 @@ iumfs_read(vnode_t *vp, struct uio *uiop, int ioflag, struct cred *cr)
 
 out:
     inp->vattr.va_atime = iumfs_get_current_time();
-    mutex_exit(&(inp->i_lock));
+    mutex_exit(&(inp->i_dlock));
     DEBUG_PRINT((CE_CONT, "iumfs_read: return(%d)\n", err));
     return (err);
 }
@@ -482,7 +483,7 @@ iumfs_getattr(vnode_t *vp, vattr_t *vap, int flags, struct cred *cr)
     /*
      * ユーザモードデーモンに最新の属性情報を問い合わせる。
      */
-    mutex_enter(&(inp->i_lock));    
+    mutex_enter(&(inp->i_dlock));    
     if((err = iumfs_request_getattr(vp)) != 0){
       goto out;
     }
@@ -577,7 +578,7 @@ iumfs_getattr(vnode_t *vp, vattr_t *vap, int flags, struct cred *cr)
      */
 
  out:
-    mutex_exit(&(inp->i_lock));
+    mutex_exit(&(inp->i_dlock));
     DEBUG_PRINT((CE_CONT, "iumfs_getattr: return(%d)\n",err));
     return (err);
 }
@@ -655,94 +656,91 @@ iumfs_lookup(vnode_t *dirvp, char *name, vnode_t **vpp, struct pathname *pnp,
     DEBUG_PRINT((CE_CONT, "iumfs_lookup: pathname=\"%s\"\n", pathname));
 
     foundid = iumfs_find_nodeid_by_name(dirinp, name);
-
-    /*
-    // おそらディレクトリエントリの中に見つけられなかったら、Path 名で検索しても
-    // 見つからないのですぐにデーモンにといわせるべき。冗長なのでやめる。
     if (foundid == 0) {
-    //
-    //  ディレクトリエントリの中に該当するファイルが見つらなかった。
-    // readdir されていない（既知でない）エントリの場合ここに来る。
-    //
-    DEBUG_PRINT((CE_CONT, "iumfs_lookup: can't get node id of \"%s\" in existing dir entry\n", name));
-    vp = iumfs_find_vnode_by_pathname(iumfsp, pathname);
-    }
-    */
-    if(foundid != 0){
-        //ディレクトリエントリの中に該当するファイルが見つかった。
+        /*
+         * ディレクトリエントリの中に該当するファイルが見つらなかった。
+         * readdir されていない（既知でない）エントリの場合ここに来る。
+         */
+        DEBUG_PRINT((CE_CONT, "iumfs_lookup: can't get node id of \"%s\" in existing dir entry\n", name));
+        vp = iumfs_find_vnode_by_pathname(iumfsp, pathname);
+    } else {
+        /*
+         * ディレクトリエントリの中に該当するファイルが見つかった。
+         */
         vp = iumfs_find_vnode_by_nodeid(iumfsp, foundid);
     }
 
-#ifdef DEBUG
-    if (vp != NULL) {DEBUG_PRINT((CE_CONT, "iumfs_lookup: found existing vnode of \"%s\"\n", name));}
-#endif
-    
-    if (strcmp(name, "..") == 0) {
-        /*
-         * ここにくるのはマウントポイントでの「..」の検索要求の時だけ。
-         * 現在は決めうちで / の vnode を返している・・
-         * TODO: マウントポイントの親ディレクトリの vnode を探してやる
-         */
-        DEBUG_PRINT((CE_CONT, "iumfs_lookup: look for a vnode of parent directory\n"));
-        err = lookupname("/", UIO_SYSSPACE, FOLLOW, 0, &vp);
-        /*
-         * lookupname() が正常終了した場合は、親ディレクトリが存在するファイルシステムが
-         * vnode の参照カウントを増加させていると期待される。
-         * なので、ここでは vnode に対して VN_HOLD() は使わない。
-         */
-        if (err) {
-            DEBUG_PRINT((CE_CONT, "iumfs_lookup: cannot find vnode of parent directory\n"));
-            err = ENOENT;
-            goto out;
-        }
+    if (vp != NULL) {
+        DEBUG_PRINT((CE_CONT, "iumfs_lookup: found existing vnode of \"%s\"\n", name));
     } else {
-        if ((err = iumfs_request_lookup(dirvp, pathname, vap)) != 0) {
-            DEBUG_PRINT((CE_CONT, "iumfs_lookup: cannot find \"%s\"\n", name));
-            // サーバ上にも見つからなかった・・エラーを返す
-            goto out;
-        }
-
-        DEBUG_PRINT((CE_CONT, "iumfs_lookup: found file \"%s\" on server\n", name));
-        /*
-         * リモートサーバ上にファイルが見つかったので新しいノードを作成する。
-         * ディレクトリの場合、「.」と「..」の 2 つディレクトリエントリを追加
-         * しなければいけないので、iumfs_make_directory() 経由でノードの
-         * 追加を行う。
-         */
-        if (vap->va_type & VDIR) {
-            if ((err = iumfs_make_directory(vfsp, &vp, dirvp, cr, foundid)) != 0) {
-                cmn_err(CE_CONT, "iumfs_lookup: failed to create directory \"%s\"\n", name);
+        if (strcmp(name, "..") == 0) {
+            /*
+             * ここにくるのはマウントポイントでの「..」の検索要求の時だけ。
+             * 現在は決めうちで / の vnode を返している・・
+             * TODO: マウントポイントの親ディレクトリの vnode を探してやる
+             */
+            DEBUG_PRINT((CE_CONT, "iumfs_lookup: look for a vnode of parent directory\n"));
+            err = lookupname("/", UIO_SYSSPACE, FOLLOW, 0, &vp);
+            /*
+             * lookupname() が正常終了した場合は、親ディレクトリが存在するファイルシステムが
+             * vnode の参照カウントを増加させていると期待される。
+             * なので、ここでは vnode に対して VN_HOLD() は使わない。
+             */
+            if (err) {
+                DEBUG_PRINT((CE_CONT, "iumfs_lookup: cannot find vnode of parent directory\n"));
+                err = ENOENT;
                 goto out;
             }
         } else {
-            if ((err = iumfs_alloc_node(vfsp, &vp, 0,
-                                        vap->va_type, foundid)) != SUCCESS) {
-                cmn_err(CE_CONT, "iumfs_lookup: failed to create new node \"%s\"\n", name);
+            if ((err = iumfs_request_lookup(dirvp, pathname, vap)) != 0) {
+                DEBUG_PRINT((CE_CONT, "iumfs_lookup: cannot find \"%s\"\n", name));
+                // サーバ上にも見つからなかった・・エラーを返す
                 goto out;
             }
-        }
-        inp = VNODE2IUMNODE(vp);
-        snprintf(inp->pathname, IUMFS_MAXPATHLEN, "%s", pathname);
 
-        DEBUG_PRINT((CE_CONT, "iumfs_lookup: allocated new node \"%s\"(nodeid=%d)\n", inp->pathname,inp->vattr.va_nodeid));            
-        /*
-         * もしまだディレクトリにのファイルのエントリがなかったら(foundid==0だったら）
-         * 割り当てられた nodeid を使ってディレクトリにエントリを追加する。
-         */
-        if(foundid == 0){
-            DEBUG_PRINT((CE_CONT, "iumfs_lookup: adding entry to directory"));
-            if (iumfs_add_entry_to_dir(dirvp, name, strlen(name), inp->vattr.va_nodeid) < 0) {
-                cmn_err(CE_CONT, "iumfs_create: cannot add new entry to directory\n");
-                err = ENOSPC;
-                goto out;
+            DEBUG_PRINT((CE_CONT, "iumfs_lookup: found file \"%s\" on server\n", name));
+            /*
+             * リモートサーバ上にファイルが見つかったので新しいノードを作成する。
+             * ディレクトリの場合、「.」と「..」の 2 つディレクトリエントリを追加
+             * しなければいけないので、iumfs_make_directory() 経由でノードの
+             * 追加を行う。
+             */
+            if (vap->va_type & VDIR) {
+                if ((err = iumfs_make_directory(vfsp, &vp, dirvp, cr, foundid)) != 0) {
+                    cmn_err(CE_CONT, "iumfs_lookup: failed to create directory \"%s\"\n", name);
+                    goto out;
+                }
+            } else {
+                if ((err = iumfs_alloc_node(vfsp, &vp, 0,
+                        vap->va_type, foundid)) != SUCCESS) {
+                    cmn_err(CE_CONT, "iumfs_lookup: failed to create new node \"%s\"\n", name);
+                    goto out;
+                }
             }
+            inp = VNODE2IUMNODE(vp);
+            snprintf(inp->pathname, IUMFS_MAXPATHLEN, "%s", pathname);
+
+            DEBUG_PRINT((CE_CONT, "iumfs_lookup: allocated new node \"%s\"(nodeid=%d)\n", inp->pathname,inp->vattr.va_nodeid));
+            /*
+             * もしまだディレクトリにのファイルのエントリがなかったら(foundid==0だったら）
+             * 割り当てられた nodeid を使ってディレクトリにエントリを追加する。
+             */
+            if(foundid == 0){
+                DEBUG_PRINT((CE_CONT, "iumfs_lookup: adding entry to directory"));
+                if (iumfs_add_entry_to_dir(dirvp, name, strlen(name), inp->vattr.va_nodeid) < 0) {
+                    cmn_err(CE_CONT, "iumfs_create: cannot add new entry to directory\n");
+                    err = ENOSPC;
+                    goto out;
+                }
+            }
+
+            // vnode の参照カウントを増やす
+            VN_HOLD(vp);
         }
-        // vnode の参照カウントを増やす            
-        VN_HOLD(vp);
     }
     *vpp = vp;
     
-  out:    
+  out:
     DEBUG_PRINT((CE_CONT, "iumfs_lookup: return(%d)\n",err));
     return (err);
 }
@@ -781,7 +779,7 @@ iumfs_readdir(vnode_t *dirvp, struct uio *uiop, struct cred *cr, int *eofp)
 
     DEBUG_PRINT((CE_CONT, "iumfs_readdir: pathname=%s\n", dirinp->pathname));
 
-    mutex_enter(&(dirinp->i_lock));
+    mutex_enter(&(dirinp->i_dlock));
     /*
      * サーバ上のディレクトリエントリを読みにいく
      */
@@ -854,7 +852,7 @@ iumfs_readdir(vnode_t *dirvp, struct uio *uiop, struct cred *cr, int *eofp)
     }
     dirinp->vattr.va_atime = iumfs_get_current_time();
 
-    mutex_exit(&(dirinp->i_lock));
+    mutex_exit(&(dirinp->i_dlock));
     DEBUG_PRINT((CE_CONT, "iumfs_readdir: return(%d)\n", err));
     return (err);
 }
@@ -881,7 +879,7 @@ iumfs_fsync(vnode_t *vp, int syncflag, struct cred *cr)
  *
  * vnode の 参照数（v_count）が 0 になった場合に VFS サブシステムから
  * 呼ばれる・・と思っていたが、これが呼ばれるときは v_count はかならず 1
- * のようだ。
+ * のようだ。 (vn_rele が v_count を増やすらしい)
  * v_count が 0 になるのは、iumfs_rmdir で明示的に参照数を 1 にしたときのみ。
  *
  *************************************************************************/
@@ -1429,7 +1427,7 @@ iumfs_write(vnode_t *vp, struct uio *uiop, int ioflag, struct cred *cr)
     // ファイルシステム型依存のノード構造体を得る
     inp = VNODE2IUMNODE(vp);
 
-    mutex_enter(&(inp->i_lock));
+    mutex_enter(&(inp->i_dlock));
 
     if (!(inp->vattr.va_type | VREG)) {
         DEBUG_PRINT((CE_CONT, "iumfs_write: file is not regurar file\n"));
@@ -1646,7 +1644,7 @@ iumfs_write(vnode_t *vp, struct uio *uiop, int ioflag, struct cred *cr)
     inp->vattr.va_mtime = iumfs_get_current_time();
 out:
     inp->vattr.va_atime = iumfs_get_current_time();
-    mutex_exit(&(inp->i_lock));
+    mutex_exit(&(inp->i_dlock));
     DEBUG_PRINT((CE_CONT, "iumfs_write: return(%d)\n", err));
     return (err);
 }
@@ -1724,11 +1722,11 @@ iumfs_create(vnode_t *dirvp, char *name, vattr_t *vap, vcexcl_t excl,
          */
         if ((vap->va_mask & AT_SIZE) && (vap->va_size == 0)) {
             // ファイルの vnode の属性情報をセット            
-            mutex_enter(&(inp->i_lock));
+            mutex_enter(&(inp->i_dlock));
             inp->vattr.va_size = 0; // inp->fsize と等価
             inp->vattr.va_nblocks = 0;
             inp->vattr.va_atime = iumfs_get_current_time();
-            mutex_exit(&(inp->i_lock));
+            mutex_exit(&(inp->i_dlock));
         }
 
         // 引数として渡されたポインタに新しい vnode のアドレスをセット
