@@ -1853,6 +1853,9 @@ iumfs_remove(vnode_t *pdirvp, char *name, struct cred *cr)
      * ユーザモードデーモンに削除を依頼
      */
     if((err = iumfs_request_remove(vp))){
+        cmn_err(CE_CONT, "iumfs_remove: iumfs_request_remove failed with err = %d\n", err); //TODO: remove
+        // TODO: サーバのファイルを削除したのに、dirent から削除しない。。。という状態が
+        // 発生しないかどうかチェック。
         goto out;
     }
     
