@@ -426,6 +426,7 @@ iumfs_remove_node_from_list(vfs_t *vfsp, vnode_t *rmvp)
                 err = EBUSY;
                 goto out;
             }
+            mutex_exit(&(rmvp->v_lock));            
             previnp->next = inp->next;
             rw_exit(&(inp->i_listlock));
             rw_exit(&(previnp->i_listlock));
