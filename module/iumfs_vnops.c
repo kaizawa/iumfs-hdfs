@@ -655,87 +655,90 @@ iumfs_lookup(vnode_t *dirvp, char *name, vnode_t **vpp, struct pathname *pnp,
     DEBUG_PRINT((CE_CONT, "iumfs_lookup: pathname=\"%s\"\n", pathname));
 
     foundid = iumfs_find_nodeid_by_name(dirinp, name);
+
+    /*
+    // おそらディレクトリエントリの中に見つけられなかったら、Path 名で検索しても
+    // 見つからないのですぐにデーモンにといわせるべき。冗長なのでやめる。
     if (foundid == 0) {
-        /*
-         * ディレクトリエントリの中に該当するファイルが見つらなかった。
-         * readdir されていない（既知でない）エントリの場合ここに来る。
-         */
-        DEBUG_PRINT((CE_CONT, "iumfs_lookup: can't get node id of \"%s\" in existing dir entry\n", name));
-        vp = iumfs_find_vnode_by_pathname(iumfsp, pathname);
-    } else {
-        /*
-         * ディレクトリエントリの中に該当するファイルが見つかった。
-         */
+    //
+    //  ディレクトリエントリの中に該当するファイルが見つらなかった。
+    // readdir されていない（既知でない）エントリの場合ここに来る。
+    //
+    DEBUG_PRINT((CE_CONT, "iumfs_lookup: can't get node id of \"%s\" in existing dir entry\n", name));
+    vp = iumfs_find_vnode_by_pathname(iumfsp, pathname);
+    }
+    */
+    if(foundid != 0){
+        //ディレクトリエントリの中に該当するファイルが見つかった。
         vp = iumfs_find_vnode_by_nodeid(iumfsp, foundid);
     }
 
-    if (vp != NULL) {
-        DEBUG_PRINT((CE_CONT, "iumfs_lookup: found existing vnode of \"%s\"\n", name));
+#ifdef DEBUG
+    if (vp != NULL) {DEBUG_PRINT((CE_CONT, "iumfs_lookup: found existing vnode of \"%s\"\n", name));}
+#endif
+    
+    if (strcmp(name, "..") == 0) {
+        /*
+         * ここにくるのはマウントポイントでの「..」の検索要求の時だけ。
+         * 現在は決めうちで / の vnode を返している・・
+         * TODO: マウントポイントの親ディレクトリの vnode を探してやる
+         */
+        DEBUG_PRINT((CE_CONT, "iumfs_lookup: look for a vnode of parent directory\n"));
+        err = lookupname("/", UIO_SYSSPACE, FOLLOW, 0, &vp);
+        /*
+         * lookupname() が正常終了した場合は、親ディレクトリが存在するファイルシステムが
+         * vnode の参照カウントを増加させていると期待される。
+         * なので、ここでは vnode に対して VN_HOLD() は使わない。
+         */
+        if (err) {
+            DEBUG_PRINT((CE_CONT, "iumfs_lookup: cannot find vnode of parent directory\n"));
+            err = ENOENT;
+            goto out;
+        }
     } else {
-        if (strcmp(name, "..") == 0) {
-            /*
-             * ここにくるのはマウントポイントでの「..」の検索要求の時だけ。
-             * 現在は決めうちで / の vnode を返している・・
-             * TODO: マウントポイントの親ディレクトリの vnode を探してやる
-             */
-            DEBUG_PRINT((CE_CONT, "iumfs_lookup: look for a vnode of parent directory\n"));
-            err = lookupname("/", UIO_SYSSPACE, FOLLOW, 0, &vp);
-            /*
-             * lookupname() が正常終了した場合は、親ディレクトリが存在するファイルシステムが
-             * vnode の参照カウントを増加させていると期待される。
-             * なので、ここでは vnode に対して VN_HOLD() は使わない。
-             */
-            if (err) {
-                DEBUG_PRINT((CE_CONT, "iumfs_lookup: cannot find vnode of parent directory\n"));
-                err = ENOENT;
+        if ((err = iumfs_request_lookup(dirvp, pathname, vap)) != 0) {
+            DEBUG_PRINT((CE_CONT, "iumfs_lookup: cannot find \"%s\"\n", name));
+            // サーバ上にも見つからなかった・・エラーを返す
+            goto out;
+        }
+
+        DEBUG_PRINT((CE_CONT, "iumfs_lookup: found file \"%s\" on server\n", name));
+        /*
+         * リモートサーバ上にファイルが見つかったので新しいノードを作成する。
+         * ディレクトリの場合、「.」と「..」の 2 つディレクトリエントリを追加
+         * しなければいけないので、iumfs_make_directory() 経由でノードの
+         * 追加を行う。
+         */
+        if (vap->va_type & VDIR) {
+            if ((err = iumfs_make_directory(vfsp, &vp, dirvp, cr, foundid)) != 0) {
+                cmn_err(CE_CONT, "iumfs_lookup: failed to create directory \"%s\"\n", name);
                 goto out;
             }
         } else {
-            if ((err = iumfs_request_lookup(dirvp, pathname, vap)) != 0) {
-                DEBUG_PRINT((CE_CONT, "iumfs_lookup: cannot find \"%s\"\n", name));
-                // サーバ上にも見つからなかった・・エラーを返す
+            if ((err = iumfs_alloc_node(vfsp, &vp, 0,
+                                        vap->va_type, foundid)) != SUCCESS) {
+                cmn_err(CE_CONT, "iumfs_lookup: failed to create new node \"%s\"\n", name);
                 goto out;
             }
-
-            DEBUG_PRINT((CE_CONT, "iumfs_lookup: found file \"%s\" on server\n", name));
-            /*
-             * リモートサーバ上にファイルが見つかったので新しいノードを作成する。
-             * ディレクトリの場合、「.」と「..」の 2 つディレクトリエントリを追加
-             * しなければいけないので、iumfs_make_directory() 経由でノードの
-             * 追加を行う。
-             */
-            if (vap->va_type & VDIR) {
-                if ((err = iumfs_make_directory(vfsp, &vp, dirvp, cr, foundid)) != 0) {
-                    cmn_err(CE_CONT, "iumfs_lookup: failed to create directory \"%s\"\n", name);
-                    goto out;
-                }
-            } else {
-                if ((err = iumfs_alloc_node(vfsp, &vp, 0,
-                        vap->va_type, foundid)) != SUCCESS) {
-                    cmn_err(CE_CONT, "iumfs_lookup: failed to create new node \"%s\"\n", name);
-                    goto out;
-                }
-            }
-            inp = VNODE2IUMNODE(vp);
-            snprintf(inp->pathname, IUMFS_MAXPATHLEN, "%s", pathname);
-
-            DEBUG_PRINT((CE_CONT, "iumfs_lookup: allocated new node \"%s\"(nodeid=%d)\n", inp->pathname,inp->vattr.va_nodeid));            
-            /*
-             * もしまだディレクトリにのファイルのエントリがなかったら(foundid==0だったら）
-             * 割り当てられた nodeid を使ってディレクトリにエントリを追加する。
-             */
-            if(foundid == 0){
-                DEBUG_PRINT((CE_CONT, "iumfs_lookup: adding entry to directory"));
-                if (iumfs_add_entry_to_dir(dirvp, name, strlen(name), inp->vattr.va_nodeid) < 0) {
-                    cmn_err(CE_CONT, "iumfs_create: cannot add new entry to directory\n");
-                    err = ENOSPC;
-                    goto out;
-                }
-            }
-
-            // vnode の参照カウントを増やす            
-            VN_HOLD(vp);
         }
+        inp = VNODE2IUMNODE(vp);
+        snprintf(inp->pathname, IUMFS_MAXPATHLEN, "%s", pathname);
+
+        DEBUG_PRINT((CE_CONT, "iumfs_lookup: allocated new node \"%s\"(nodeid=%d)\n", inp->pathname,inp->vattr.va_nodeid));            
+        /*
+         * もしまだディレクトリにのファイルのエントリがなかったら(foundid==0だったら）
+         * 割り当てられた nodeid を使ってディレクトリにエントリを追加する。
+         */
+        if(foundid == 0){
+            DEBUG_PRINT((CE_CONT, "iumfs_lookup: adding entry to directory"));
+            if (iumfs_add_entry_to_dir(dirvp, name, strlen(name), inp->vattr.va_nodeid) < 0) {
+                cmn_err(CE_CONT, "iumfs_create: cannot add new entry to directory\n");
+                err = ENOSPC;
+                goto out;
+            }
+        }
+        // vnode の参照カウントを増やす            
+        VN_HOLD(vp);
     }
     *vpp = vp;
     
