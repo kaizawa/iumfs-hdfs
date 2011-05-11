@@ -158,7 +158,10 @@ public abstract class Request {
     public FileSystem getFileSystem() {
         if (fs == null) {
             try {
-                fs = FileSystem.get(new Configuration());
+                Configuration conf = new Configuration();
+                conf.set("fs.defaultFS", server);
+                logger.finer("server=" + server);                
+                fs = FileSystem.get(conf);
             } catch (IOException ex) {
                 ex.printStackTrace();
                 System.exit(1);

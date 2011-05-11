@@ -6,7 +6,10 @@
   <property name="dist" value="./"/>
   <property environment="env" />
   <path id="class.path">
+<!--
       <fileset dir="${env.HADOOP_HOME}">
+-->
+      <fileset dir="/usr/local/hadoop">
          <include name="*.jar" />
       </fileset>  
   </path>

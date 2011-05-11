@@ -152,7 +152,7 @@ static struct vfsops iumfs_vfsops = {
 // Solaris 10 の場合、vfssw 構造体は直接作成しない。
 static vfsdef_t iumfs_vfsdef = {
     VFSDEF_VERSION, // int   バージョン
-    "hdfs", // char  ファイルシステムタイプを示す名前
+    "iumfs", // char  ファイルシステムタイプを示す名前
     &iumfs_init, // int   初期化ルーチン
     0, // int   フラグ
     &iumfs_optproto // mntopts_tmount マウントオプションテーブルのプロトタイプ

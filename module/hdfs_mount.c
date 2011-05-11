@@ -61,10 +61,15 @@ int
 main(int argc, char *argv[])
 {
     char *opts = NULL;
+    char *opt = NULL;    
     char *resource = NULL;
     char *mountpoint = NULL;
     int c;
+    int verbose = 0;    
     iumfs_mount_opts_t mountopts[1];
+    char *server_and_path = NULL;
+    char *path = NULL;
+    size_t n;
 
     memset(mountopts, 0x0, sizeof (iumfs_mount_opts_t));
 
@@ -87,12 +92,70 @@ main(int argc, char *argv[])
     }
     resource = truncate_slash(argv[optind++]);
     mountpoint = truncate_slash(argv[optind++]);
+    /*
+     * -o で指定されたオプションを解釈する。
+     * サポートしているのはは以下の2つのオプションだけ。
+     * user=<user name>
+     * pass=<password>
+     *
+     * 例） -o user=root,pass=hoge
+     */
+    if(opts){
+        char *arg;
 
-    strcpy(mountopts->basepath, resource);
-    if (strlen(mountopts->basepath) == 0)
+        arg = opts;
+        while((opt = strtok(arg, ",")) != NULL){
+
+            if(!strncmp(opt, "user=", 5))
+                strcpy(mountopts->user,&opt[5]);
+            else if (!strncmp(opt, "pass=", 5))
+                strcpy(mountopts->pass, &opt[5]);
+            else if (!strncmp(opt, "verbose", 7))
+                verbose = 1;
+            else {
+                printf("Unknown option %s\n", opt);
+                print_usage(argv[0]);
+            }
+            
+            arg = NULL;
+        }
+    }
+
+    /*
+     * mount コマンドに渡されたリソース部分から ftp サーバ名と、マウントする
+     * ベースディレクトリを解釈する。
+     */
+    
+    if((server_and_path = strstr(resource, "://")) == NULL){
+        printf("Invalid URL\n");        
+        print_usage(argv[0]);
+    }
+    server_and_path += 4;
+    if(strlen (resource) < server_and_path - resource){
+        printf("No server name specified\n");        
+        print_usage(argv[0]);
+    }
+    if((path = strstr(server_and_path, "/")) == NULL){
+        printf("No pathname specified\n");
+        print_usage(argv[0]);
+    }
+    n = strcspn(server_and_path, "/");
+    strncpy(mountopts->server, resource, path - resource);
+    strcpy(mountopts->basepath, path);
+
+    if(strlen(mountopts->basepath)==0)
         strcpy(mountopts->basepath, "/");
+    
+    if(verbose){
+        printf("user = %s\n", mountopts->user);
+        printf("pass = %s\n", mountopts->pass);
+        printf("resoruce = %s\n",resource);
+        printf("mountpint = %s\n", mountpoint);
+        printf("server = %s\n", mountopts->server);
+        printf("basepath = %s\n", mountopts->basepath);
+    }
 
-    if (mount(resource, mountpoint, MS_DATA, "hdfs", mountopts, sizeof (mountopts)) < 0) {
+    if (mount(resource, mountpoint, MS_DATA, "iumfs", mountopts, sizeof (mountopts)) < 0) {
         perror("mount");
         exit(0);
     }
@@ -108,9 +171,9 @@ main(int argc, char *argv[])
 void
 print_usage(char *argv)
 {
-    printf("Usage: %s -F hdfs hdfs_base_path mount_point\n", argv);
+    printf("Usage: %s -F iumfs protocol://base_path mount_point\n", argv);
     printf("Example)\n");
-    printf("    mount -F hdfs /user/username /mnt\n");
+    printf("    mount -F iumfs hdfs://user/username /mnt\n");
     exit(0);    
 }
 

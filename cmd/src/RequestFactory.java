@@ -126,6 +126,7 @@ public class RequestFactory {
             req.setOffset(offset);
             req.setPathname((new String(pathname)).trim()); // 後ろの空白文字を削除
             req.setBasepath((new String(basepath)).trim()); // 後ろの空白文字を削除
+            req.setServer((new String(server)).trim()); // 後ろの空白文字を削除
             req.setRequestType(request_type);
             req.setSize(size);
             req.setFlags(flags);
