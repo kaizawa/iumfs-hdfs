@@ -31,7 +31,7 @@
 # You will be prompted password for root user.
 #
 procs=5 # number of processes for stress test
-stresstime=60 # number of seconds for stress test
+stresstime=6000 # number of seconds for stress test
 daemonpid=""
 mnt="/var/tmp/iumfsmnt"
 base="/var/tmp/iumfsbase"
@@ -43,7 +43,8 @@ ${HADOOP_HOME}/lib/commons-logging-1.1.1.jar"
 
 
 init (){
-         LOGFILE=testcmd/test-`date '+%Y%m%d-%H:%M:%S'`.log
+	LOGDIR=$PWD/testcmd
+        LOGFILE=$LOGDIR/test-`date '+%Y%m%d-%H:%M:%S'`.log
         touch $LOGFILE
 	# Just in case, umount ${mnt}
 	while : 
@@ -71,7 +72,7 @@ init (){
 	fi
 }
 
-init_fstestd(){
+init_fstest(){
         echo "##"
         echo "## Preparing required directory for test."
         echo "##"
@@ -89,7 +90,7 @@ init_fstestd(){
 }
 
 
-init_hdfsd (){
+init_hdfs (){
        if [ ! -f "${HADOOP_HOME}/hadoop-common-0.21.0.jar" ]; then
            echo "Can't find hadoop-common-0.21.0.jar. HADOOP_HOME might not be set correctly."
            exit 1
@@ -131,7 +132,8 @@ do_umount() {
 }
 
 start_fstestd() {
-	./testcmd/fstestd -d 3 > testcmd/fstestd.log 2>&1 &
+	#./testcmd/fstestd -d 3 > testcmd/fstestd.log 2>&1 &
+	./testcmd/fstestd &
 	if [ "$?" -eq 0 ]; then
 		daemonpid=$! 
 		return 0		
@@ -195,22 +197,14 @@ fini() {
 	sleep 1
 	do_umount
 	kill_daemon
-        case "$1" in
-            'hdfsd')
-                hdfs dfs -rmr /var/tmp/iumfsbase  >> $LOGFILE 2>&1
-                ;;
-            'fstestd')
-	        rm -rf ${base} >> $LOGFILE 2>&1
-                ;;
-        esac
         #rm -rf ${mnt} >> $LOGFILE 2>&1
         echo "##"
         echo "## Finished."
         echo "##"
-        echo "See logs under testcmd for detail."
+        echo "See log files for detail."
         echo "\t$LOGFILE"
-        echo "\ttestcmd/fstestd.log"
-        echo "\ttestcmd/hdfsd.log"
+        echo "\t$LOGDIR/fstestd.log"
+        echo "\t$LOGDIR/hdfsd.log"
         exit 0
 }
 
@@ -231,14 +225,22 @@ do_basic_test(){
 
 do_create_and_delete(){
      filename=$RANDOM
+     start=`date +'%s'`
+     count=0
      cd ${mnt}
      while :
      do
+         current=`date +'%s'`
+         elapsed=`expr $current - $start`
+         throughput=`echo "$count/$elapsed" | bc -l 2>/dev/null` 
+         echo "$count $elapsed $throughput" > $LOGDIR/throughput.$filename
+         count=`expr $count + 1`
          echo $filename > $filename
 	 if [ "$?" -ne 0 ]; then
 	     echo "do_create_and_delete: cannot create $filenme." | tee >> $LOGFILE 2>&1
              continue
 	 fi
+         /bin/ls -aF > /dev/null 2>&1
          rm $filename
 	 if [ "$?" -ne 0 ]; then
 	     echo "do_create_and_delete: cannot remove $filenme." | tee >> $LOGFILE 2>&1
@@ -283,18 +285,18 @@ main() {
     exec_mount_test
 
     case "$1" in
-        'hdfsd')
-            init_hdfsd
+        'hdfs')
+            init_hdfs
             do_mount    
             start_hdfsd
             ;;
-        'fstestd')
-            init_fstestd
+        'fstest')
+            init_fstest
             do_mount
             start_fstestd
             ;;
          *)
-            echo "Usage: $0 { fstestd | hdfsd }"
+            echo "Usage: $0 { fstest | hdfs }"
             exit 1
         ;;
     esac
@@ -306,6 +308,3 @@ main() {
 }
 
 main $1
-
-
-
