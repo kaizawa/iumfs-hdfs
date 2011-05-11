@@ -74,5 +74,5 @@ test:
 test-all:
 	cd testcmd ; make test-all
 
-test-hdfsd:
-	cd testcmd ; make test-hdfsd
+test-hdfs:
+	cd testcmd ; make test-hdfs
