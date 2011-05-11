@@ -110,6 +110,7 @@ iumfs_request_read(struct buf *bp, vnode_t *vp)
     iumnode_t *inp;
     iumfs_mount_opts_t *mountopts;
     int err = 0;
+    int done = 0;
 
     DEBUG_PRINT((CE_CONT, "iumfs_request_read called\n"));
 
@@ -122,62 +123,70 @@ iumfs_request_read(struct buf *bp, vnode_t *vp)
 
     DEBUG_PRINT((CE_CONT, "iumfs_request_read: offset = %D, size = %d\n", offset, size));
 
-    /*
-     * オープン中で未使用の iumfscntl デバイスを受け取る。 
-     * もしすべてのデバイスが使用中ならリクエストの順番待ちをする
-     */  
-    if((err = iumfs_daemon_request_enter(&cntlsoft))){
-        goto out;
-    }
+    do {
+        /*
+         * オープン中で未使用の iumfscntl デバイスを受け取る。 
+         * もしすべてのデバイスが使用中ならリクエストの順番待ちをする
+         */  
+        if((err = iumfs_daemon_request_enter(&cntlsoft))){
+            goto out;
+        }
     
-    mutex_enter(&cntlsoft->d_lock);
-    /*
-     * マウントオプション、ファイルシステム依存ノード構造体、ユーザ空間とマッピング
-     * しているメモリアドレスを得る。
-     */
-    inp = VNODE2IUMNODE(vp);
-    iumfsp = VNODE2IUMFS(vp);
-    mountopts = iumfsp->mountopts;
-    req = (request_t *) cntlsoft->bufaddr;
-    /*
-     * ユーザモードデーモンに渡すリクエストを request 構造体にセット
-     */
-    bzero(req, sizeof (request_t));
-    req->request_type = READ_REQUEST;
-    strncpy(req->pathname, inp->pathname, IUMFS_MAXPATHLEN); // マウントポイントからの相対パス名
-    bcopy(mountopts, req->mountopts, sizeof (iumfs_mount_opts_t));
-    req->offset = offset; // オフセット    
-    req->size = size; // サイズ
-    req->datasize = 0;
-    cntlsoft->bufusedsize = sizeof (request_t) + req->datasize;
-    mutex_exit(&cntlsoft->d_lock); // checking
+        mutex_enter(&cntlsoft->d_lock);
+        /*
+         * マウントオプション、ファイルシステム依存ノード構造体、ユーザ空間とマッピング
+         * しているメモリアドレスを得る。
+         */
+        inp = VNODE2IUMNODE(vp);
+        iumfsp = VNODE2IUMFS(vp);
+        mountopts = iumfsp->mountopts;
+        req = (request_t *) cntlsoft->bufaddr;
+        /*
+         * ユーザモードデーモンに渡すリクエストを request 構造体にセット
+         */
+        bzero(req, sizeof (request_t));
+        req->request_type = READ_REQUEST;
+        strncpy(req->pathname, inp->pathname, IUMFS_MAXPATHLEN); // マウントポイントからの相対パス名
+        bcopy(mountopts, req->mountopts, sizeof (iumfs_mount_opts_t));
+        req->offset = offset; // オフセット    
+        req->size = size; // サイズ
+        req->datasize = 0;
+        cntlsoft->bufusedsize = sizeof (request_t) + req->datasize;
+        mutex_exit(&cntlsoft->d_lock); // checking
 
-    /*
-     * リクエスト要求を開始する
-     */
-    err = iumfs_daemon_request_start(cntlsoft);
-    if (err) {
-         //エラーが発生した模様。リクエストを解除してエラーをリターン
+        /*
+         * リクエスト要求を開始する
+         */
+        err = iumfs_daemon_request_start(cntlsoft);
+        if (err) {
+            // エラーが発生した模様。リクエストを解除
+            iumfs_daemon_request_exit(cntlsoft);
+            if (err == EAGAIN){
+                // タイムアウトしてしまったようだ。最初からやり直し。
+                continue;
+            }
+            goto out;
+        }    
+
+        /*
+         * デーモンから受け取ったデータをコピー
+         * 受け取ったサイズによらず、コピーするのは最大で 'size' 分だけ。
+         */
+        mutex_enter(&cntlsoft->d_lock);
+        // TODO: cntlsoft->bufusedsize に実際に uiomove されたサイズが書かれているので、それを確認するべき！
+        res = (response_t *) cntlsoft->bufaddr;
+        bcopy((char *) res + sizeof (response_t), bp->b_un.b_addr, MIN(size, res->datasize));
+        mutex_exit(&cntlsoft->d_lock);
+
+        /*
+         * リクエストを解除。他の待ち thread を起こす
+         */
         iumfs_daemon_request_exit(cntlsoft);
-        goto out;
-    }
 
-    /*
-     * デーモンから受け取ったデータをコピー
-     * 受け取ったサイズによらず、コピーするのは最大で 'size' 分だけ。
-     */
-    mutex_enter(&cntlsoft->d_lock);
-    // TODO: cntlsoft->bufusedsize に実際に uiomove されたサイズが書かれているので、それを確認するべき！
-    res = (response_t *) cntlsoft->bufaddr;
-    bcopy((char *) res + sizeof (response_t), bp->b_un.b_addr, MIN(size, res->datasize));
-    mutex_exit(&cntlsoft->d_lock);
-
-    /*
-     * リクエストを解除。他の待ち thread を起こす
-     */
-    iumfs_daemon_request_exit(cntlsoft);
-
-    DEBUG_PRINT((CE_CONT, "iumfs_request_read: copy data done\n"));
+        DEBUG_PRINT((CE_CONT, "iumfs_request_read: copy data done\n"));
+        done = 1;
+    } while (!done);
+    
 out:
     DEBUG_PRINT((CE_CONT, "iumfs_request_read: return(%d)\n",err));
     return (err);
@@ -250,7 +259,6 @@ iumfs_request_readdir(vnode_t *dirvp)
      * リクエスト要求を開始する
      */
     err = iumfs_daemon_request_start(cntlsoft);
-
     if (err) {
         // エラーが発生した模様。リクエストを解除してエラーリターン
         iumfs_daemon_request_exit(cntlsoft);
@@ -453,7 +461,6 @@ iumfs_daemon_request_start(iumfscntl_soft_t *cntlsoft)
 {
     int err;
     int ret;
-    int retrans = 0;
 
     DEBUG_PRINT((CE_CONT, "iumfs_daemon_request_start called\n"));
 
@@ -480,10 +487,12 @@ iumfs_daemon_request_start(iumfscntl_soft_t *cntlsoft)
         DEBUG_PRINT((CE_CONT, "iumfs_daemon_request_start: waiting for data from daemon(state = 0x%x)\n", cntlsoft->state));
         if ((ret = cv_timedwait_sig(&cntlsoft->cv, &cntlsoft->s_lock, ddi_get_lbolt() + DAEMON_TIMEOUT_TICK)) < 0) {
             // タイムアウト
-            retrans++;                
+            cmn_err(CE_CONT, "daemon not responding. still trying.\n");            
+            cntlsoft->state |= REQUEST_IS_CANCELED;
+            mutex_exit(&cntlsoft->s_lock);                        
             pollwakeup(&cntlsoft->pollhead, POLLERR | POLLRDBAND);
-            cmn_err(CE_CONT, "daemon not responding. still trying. retrans=%d\n", retrans);
-            continue;
+            DEBUG_PRINT((CE_CONT, "iumfs_daemon_request_start: return(EAGAIN)\n"));            
+            return(EAGAIN);
         } else if (ret == 0) {
             /*
              * 割り込みを受けた。 EINTR を返す。
@@ -506,9 +515,7 @@ iumfs_daemon_request_start(iumfscntl_soft_t *cntlsoft)
     DEBUG_PRINT((CE_CONT, "iumfs_daemon_request_start: data has come from daemon\n"));
 
     if (cntlsoft->state & BUFFER_INVALID) {
-        /*
-         * デーモンが死んだ、もしくはエラーを返してきた。
-         */
+        // デーモンが死んだ、もしくはエラーを返してきた。
         cmn_err(CE_CONT, "iumfs_daemon_request_start: buffer data is invalid.(state=0x%x). daemon might be dead\n",
                 cntlsoft->state);
     }
@@ -576,80 +583,87 @@ iumfs_request_lookup(vnode_t *dirvp, char *pathname, vattr_t *vap)
     iumfs_mount_opts_t *mountopts;
     int err = 0;
     iumfs_vattr_t *ivap;
+    int done = 0;
 
     DEBUG_PRINT((CE_CONT, "iumfs_request_lookup called\n"));
 
-    /*
-     * オープン中で未使用の iumfscntl デバイスを受け取る。 
-     * もしすべてのデバイスが使用中ならリクエストの順番待ちをする
-     */  
-    if((err = iumfs_daemon_request_enter(&cntlsoft))){
-        goto out;
-    }     
-
-    mutex_enter(&cntlsoft->d_lock);
-    /*
-     * マウントオプション、ファイルシステム依存ノード構造体、ユーザ空間とマッピング
-     * しているメモリアドレスを得る。
-     */
-    iumfsp = VNODE2IUMFS(dirvp);
-    mountopts = iumfsp->mountopts;
-    req = (request_t *) cntlsoft->bufaddr;
-    /*
-     * ユーザモードデーモンに渡すリクエストを request 構造体にセット
-     */
-    bzero(req, sizeof (request_t));
-    req->request_type = GETATTR_REQUEST; // LOOKUP だが、中身は GETATTR と同じ
-    snprintf(req->pathname, IUMFS_MAXPATHLEN, "%s", pathname); //マウントポイントからのパス名
-    bcopy(mountopts, req->mountopts, sizeof (iumfs_mount_opts_t));
-    req->datasize = 0;
-    cntlsoft->bufusedsize = sizeof (request_t) + req->datasize;
-    mutex_exit(&cntlsoft->d_lock);
-
-    /*
-     * リクエスト要求を開始する
-     */
-    err = iumfs_daemon_request_start(cntlsoft);
-    if (err) {
+    do {
         /*
-         * エラーが発生した模様。リクエストを解除してエラーリターン
-         */
-        iumfs_daemon_request_exit(cntlsoft);
-        goto out;
-    }
-
-    /*
-     * デーモンから受け取ったデータは cntlsoft->bufaddr にコピーされているはずなの
-     * でそれをさらにコピー。
-     * TODO: コピー回数が多くて非効率.要改善.
-     */
-    mutex_enter(&cntlsoft->d_lock);
-    res = (response_t *) cntlsoft->bufaddr;
-    if (res->datasize < sizeof (iumfs_vattr_t)) {
+         * オープン中で未使用の iumfscntl デバイスを受け取る。 
+         * もしすべてのデバイスが使用中ならリクエストの順番待ちをする
+         */  
+        if((err = iumfs_daemon_request_enter(&cntlsoft))){
+            goto out;
+        }
+        
+        mutex_enter(&cntlsoft->d_lock);
         /*
-         * データ部のサイズが小さい。リクエストを解除してエラーリターン
-         * EAGAIN は適切でないかも・・・
+         * マウントオプション、ファイルシステム依存ノード構造体、ユーザ空間とマッピング
+         * しているメモリアドレスを得る。
          */
-        cmn_err(CE_CONT, "iumfs_request_lookup: res->datasize(%lld) != sizeof(iumfs_vattr_t)(%lld)\n",
-                (longlong_t) res->datasize, (longlong_t)sizeof (iumfs_vattr_t));
+        iumfsp = VNODE2IUMFS(dirvp);
+        mountopts = iumfsp->mountopts;
+        req = (request_t *) cntlsoft->bufaddr;
+        /*
+         * ユーザモードデーモンに渡すリクエストを request 構造体にセット
+         */
+        bzero(req, sizeof (request_t));
+        req->request_type = GETATTR_REQUEST; // LOOKUP だが、中身は GETATTR と同じ
+        snprintf(req->pathname, IUMFS_MAXPATHLEN, "%s", pathname); //マウントポイントからのパス名
+        bcopy(mountopts, req->mountopts, sizeof (iumfs_mount_opts_t));
+        req->datasize = 0;
+        cntlsoft->bufusedsize = sizeof (request_t) + req->datasize;
         mutex_exit(&cntlsoft->d_lock);
-        iumfs_daemon_request_exit(cntlsoft);
-        err = EAGAIN;
-        goto out;
-    }
-    ivap = (iumfs_vattr_t *) ((char *) res + sizeof (response_t));
-    /*
-     * TODO: 呼び出し側で使われるのは va_type だけ・・・ちょっと非効率
-     */
-    DEBUG_PRINT((CE_CONT, "iumfs_request_lookup: i_type=%ld\n", ivap->i_type));
-    vap->va_type = ivap->i_type;
-    mutex_exit(&cntlsoft->d_lock);
 
-    /*
-     * リクエストを解除。他の待ち thread を起こす
-     */
-    iumfs_daemon_request_exit(cntlsoft);
-    DEBUG_PRINT((CE_CONT, "iumfs_request_lookup: copy data done\n"));
+        /*
+         * リクエスト要求を開始する
+         */
+        err = iumfs_daemon_request_start(cntlsoft);
+        if (err) {
+            // エラーが発生した模様。リクエストを解除
+            iumfs_daemon_request_exit(cntlsoft);
+            if (err == EAGAIN){
+                // タイムアウトしてしまったようだ。最初からやり直し。
+                continue;
+            }
+            goto out;
+        }
+
+        /*
+         * デーモンから受け取ったデータは cntlsoft->bufaddr にコピーされているはずなの
+         * でそれをさらにコピー。
+         * TODO: コピー回数が多くて非効率.要改善.
+         */
+        mutex_enter(&cntlsoft->d_lock);
+        res = (response_t *) cntlsoft->bufaddr;
+        if (res->datasize < sizeof (iumfs_vattr_t)) {
+            /*
+             * データ部のサイズが小さい。リクエストを解除してエラーリターン
+             * EAGAIN は適切でないかも・・・
+             */
+            cmn_err(CE_CONT, "iumfs_request_lookup: res->datasize(%lld) != sizeof(iumfs_vattr_t)(%lld)\n",
+                    (longlong_t) res->datasize, (longlong_t)sizeof (iumfs_vattr_t));
+            mutex_exit(&cntlsoft->d_lock);
+            iumfs_daemon_request_exit(cntlsoft);
+            err = EAGAIN;
+            goto out;
+        }
+        ivap = (iumfs_vattr_t *) ((char *) res + sizeof (response_t));
+        /*
+         * TODO: 呼び出し側で使われるのは va_type だけ・・・ちょっと非効率
+         */
+        DEBUG_PRINT((CE_CONT, "iumfs_request_lookup: i_type=%ld\n", ivap->i_type));
+        vap->va_type = ivap->i_type;
+        mutex_exit(&cntlsoft->d_lock);
+
+        /*
+         * リクエストを解除。他の待ち thread を起こす
+         */
+        iumfs_daemon_request_exit(cntlsoft);
+        DEBUG_PRINT((CE_CONT, "iumfs_request_lookup: copy data done\n"));
+        done = 1;
+    } while (!done);
+    
 out:
     DEBUG_PRINT((CE_CONT, "iumfs_request_lookup: return(%d)\n", err));
     return (err);
@@ -683,86 +697,91 @@ iumfs_request_getattr(vnode_t *vp)
     iumfs_mount_opts_t *mountopts;
     int err = 0;
     iumfs_vattr_t *ivap;
+    int done = 0;
 
     DEBUG_PRINT((CE_CONT, "iumfs_request_getattr called\n"));
 
-    /*
-     * オープン中で未使用の iumfscntl デバイスを受け取る。 
-     * もしすべてのデバイスが使用中ならリクエストの順番待ちをする
-     */  
-    if((err = iumfs_daemon_request_enter(&cntlsoft))){
-        goto out;
-    }     
-
-    mutex_enter(&cntlsoft->d_lock);
-    /*
-     * マウントオプション、ファイルシステム依存ノード構造体、ユーザ空間とマッピング
-     * しているメモリアドレスを得る。
-     */
-    inp = VNODE2IUMNODE(vp);
-    iumfsp = VNODE2IUMFS(vp);
-    mountopts = iumfsp->mountopts;
-    req = (request_t *) cntlsoft->bufaddr;
-    /*
-     * ユーザモードデーモンに渡すリクエストを request 構造体にセット
-     */
-    bzero(req, sizeof (request_t));
-    req->request_type = GETATTR_REQUEST;
-    snprintf(req->pathname, IUMFS_MAXPATHLEN, "%s", inp->pathname); //マウントポイントからの相対パス
-    bcopy(mountopts, req->mountopts, sizeof (iumfs_mount_opts_t));
-    req->datasize = 0;
-    cntlsoft->bufusedsize = sizeof (request_t) + req->datasize;
-    mutex_exit(&cntlsoft->d_lock);
-
-    /*
-     * リクエスト要求を開始する
-     */
-    err = iumfs_daemon_request_start(cntlsoft);
-    if (err) {
+    do {
         /*
-         * エラーが発生した模様。リクエストを解除してエラーリターン
-         */
-        iumfs_daemon_request_exit(cntlsoft);
-        goto out;
-    }
+         * オープン中で未使用の iumfscntl デバイスを受け取る。 
+         * もしすべてのデバイスが使用中ならリクエストの順番待ちをする
+         */  
+        if((err = iumfs_daemon_request_enter(&cntlsoft))){
+            goto out;
+        }     
 
-    mutex_enter(&cntlsoft->d_lock);
-    res = (response_t *) cntlsoft->bufaddr;
-    DEBUG_PRINT((CE_CONT, "iumfs_request_getattr: got a response from daemon.\n"));
-    DEBUG_PRINT((CE_CONT, "iumfs_request_getattr: datasize=%d, result=%d\n", res->datasize, res->result));
-    if (res->datasize < sizeof (iumfs_vattr_t)) {
+        mutex_enter(&cntlsoft->d_lock);
         /*
-         * データ部のサイズが小さい。リクエストを解除してエラーリターン
-         * EAGAIN は適切じゃないかも・・・
+         * マウントオプション、ファイルシステム依存ノード構造体、ユーザ空間とマッピング
+         * しているメモリアドレスを得る。
          */
-        cmn_err(CE_CONT, "iumfs_request_getattr: res->datasize(%lld) != sizeof(iumfs_vattr_t)(%lld)\n",
-                (longlong_t) res->datasize, (longlong_t)sizeof (iumfs_vattr_t));
+        inp = VNODE2IUMNODE(vp);
+        iumfsp = VNODE2IUMFS(vp);
+        mountopts = iumfsp->mountopts;
+        req = (request_t *) cntlsoft->bufaddr;
+        /*
+         * ユーザモードデーモンに渡すリクエストを request 構造体にセット
+         */
+        bzero(req, sizeof (request_t));
+        req->request_type = GETATTR_REQUEST;
+        snprintf(req->pathname, IUMFS_MAXPATHLEN, "%s", inp->pathname); //マウントポイントからの相対パス
+        bcopy(mountopts, req->mountopts, sizeof (iumfs_mount_opts_t));
+        req->datasize = 0;
+        cntlsoft->bufusedsize = sizeof (request_t) + req->datasize;
         mutex_exit(&cntlsoft->d_lock);
+
+        /*
+         * リクエスト要求を開始する
+         */
+        err = iumfs_daemon_request_start(cntlsoft);
+        if (err) {
+            // エラーが発生した模様。リクエストを解除
+            iumfs_daemon_request_exit(cntlsoft);
+            if (err == EAGAIN){
+                // タイムアウトしてしまったようだ。最初からやり直し。
+                continue;
+            }
+            goto out;
+        }
+        mutex_enter(&cntlsoft->d_lock);
+        res = (response_t *) cntlsoft->bufaddr;
+        DEBUG_PRINT((CE_CONT, "iumfs_request_getattr: got a response from daemon.\n"));
+        DEBUG_PRINT((CE_CONT, "iumfs_request_getattr: datasize=%d, result=%d\n", res->datasize, res->result));
+        if (res->datasize < sizeof (iumfs_vattr_t)) {
+            /*
+             * データ部のサイズが小さい。リクエストを解除してエラーリターン
+             * EAGAIN は適切じゃないかも・・・
+             */
+            cmn_err(CE_CONT, "iumfs_request_getattr: res->datasize(%lld) != sizeof(iumfs_vattr_t)(%lld)\n",
+                    (longlong_t) res->datasize, (longlong_t)sizeof (iumfs_vattr_t));
+            mutex_exit(&cntlsoft->d_lock);
+            iumfs_daemon_request_exit(cntlsoft);
+            err = EAGAIN;
+            goto out;
+        }
+
+        /*
+         * デーモンから受け取ったデータをコピー
+         * モード、サイズ、タイプ、更新時間のみ。
+         */
+        ivap = (iumfs_vattr_t *) ((char *) res + sizeof (response_t));
+        DEBUG_PRINT((CE_CONT, "iumfs_request_getattr: i_type=%ld, i_mode=%ld, i_size=%ld\n",
+                     ivap->i_type, ivap->i_mode, ivap->i_size));
+        inp->vattr.va_mode = ivap->i_mode;
+        inp->vattr.va_size = ivap->i_size;
+        inp->vattr.va_type = ivap->i_type;
+        inp->vattr.va_mtime.tv_sec = ivap->mtime_sec;
+        inp->vattr.va_mtime.tv_nsec = ivap->mtime_nsec;
+        mutex_exit(&cntlsoft->d_lock);
+
+        /*
+         * リクエストを解除。他の待ち thread を起こす
+         */
         iumfs_daemon_request_exit(cntlsoft);
-        err = EAGAIN;
-        goto out;
-    }
-
-    /*
-     * デーモンから受け取ったデータをコピー
-     * モード、サイズ、タイプ、更新時間のみ。
-     */
-    ivap = (iumfs_vattr_t *) ((char *) res + sizeof (response_t));
-    DEBUG_PRINT((CE_CONT, "iumfs_request_getattr: i_type=%ld, i_mode=%ld, i_size=%ld\n",
-            ivap->i_type, ivap->i_mode, ivap->i_size));
-    inp->vattr.va_mode = ivap->i_mode;
-    inp->vattr.va_size = ivap->i_size;
-    inp->vattr.va_type = ivap->i_type;
-    inp->vattr.va_mtime.tv_sec = ivap->mtime_sec;
-    inp->vattr.va_mtime.tv_nsec = ivap->mtime_nsec;
-    mutex_exit(&cntlsoft->d_lock);
-
-    /*
-     * リクエストを解除。他の待ち thread を起こす
-     */
-    iumfs_daemon_request_exit(cntlsoft);
-    DEBUG_PRINT((CE_CONT, "iumfs_request_getattr: copy data done\n"));
-
+        DEBUG_PRINT((CE_CONT, "iumfs_request_getattr: copy data done\n"));
+        done = 1;
+    } while (!done);
+    
 out:
     DEBUG_PRINT((CE_CONT, "iumfs_request_getattr: return(%d)\n", err));
     return (err);
@@ -795,66 +814,74 @@ iumfs_request_write(struct buf *bp, vnode_t *vp)
     iumnode_t *inp;
     iumfs_mount_opts_t *mountopts;
     int err = 0;
+    int done = 0;
 
     DEBUG_PRINT((CE_CONT, "iumfs_request_write called\n"));
 
-    /*
-     * block 数から byte 数へ・・・なんか無意味な操作
-     * ちなみに、b_bcount は PAGESIZE より大きい可能性もある
-     */
-    offset = ldbtob(bp->b_lblkno);
-    size = bp->b_bcount;
+    do {
+        /*
+         * block 数から byte 数へ・・・なんか無意味な操作
+         * ちなみに、b_bcount は PAGESIZE より大きい可能性もある
+         */
+        offset = ldbtob(bp->b_lblkno);
+        size = bp->b_bcount;
 
-    DEBUG_PRINT((CE_CONT, "iumfs_request_write: offset = %D, size = %d\n", offset, size));
+        DEBUG_PRINT((CE_CONT, "iumfs_request_write: offset = %D, size = %d\n", offset, size));
 
-    /*
-     * オープン中で未使用の iumfscntl デバイスを受け取る。 
-     * もしすべてのデバイスが使用中ならリクエストの順番待ちをする
-     */  
-    if((err = iumfs_daemon_request_enter(&cntlsoft))){
-        goto out;
-    }
+        /*
+         * オープン中で未使用の iumfscntl デバイスを受け取る。 
+         * もしすべてのデバイスが使用中ならリクエストの順番待ちをする
+         */  
+        if((err = iumfs_daemon_request_enter(&cntlsoft))){
+            goto out;
+        }
 
-    mutex_enter(&cntlsoft->d_lock);
-    /*
-     * マウントオプション、ファイルシステム依存ノード構造体、ユーザ空間とマッピング
-     * しているメモリアドレスを得る。
-     */
-    inp = VNODE2IUMNODE(vp);
-    iumfsp = VNODE2IUMFS(vp);
-    mountopts = iumfsp->mountopts;
-    req = (request_t *) cntlsoft->bufaddr; // bufaddr の大きさは DEVICE_BUFFER_SIZE
-    /*
-     * ユーザモードデーモンに渡すリクエストを request 構造体にセット
-     */
-    bzero(req, sizeof (request_t));
-    req->request_type = WRITE_REQUEST;
-    strncpy(req->pathname, inp->pathname, IUMFS_MAXPATHLEN); // マウントポイントからの相対パス名
-    bcopy(mountopts, req->mountopts, sizeof (iumfs_mount_opts_t));
-    req->offset = offset; // オフセット
-    req->size = size; // 要求されたサイズ
-    req->datasize = (size & ~7) + ((size & 7) ? 8 : 0); // バッファに追記するデータサイズ(8の倍数)
-    req->datasize = MIN(req->datasize, DEVICE_BUFFER_SIZE - sizeof (request_t)); // バッファサイズを超えてはいけない
-    cntlsoft->bufusedsize = sizeof (request_t) + req->datasize;
-    bcopy(bp->b_un.b_addr, (char *) req + sizeof (request_t), size); 
-    mutex_exit(&cntlsoft->d_lock); // checking
+        mutex_enter(&cntlsoft->d_lock);
+        /*
+         * マウントオプション、ファイルシステム依存ノード構造体、ユーザ空間とマッピング
+         * しているメモリアドレスを得る。
+         */
+        inp = VNODE2IUMNODE(vp);
+        iumfsp = VNODE2IUMFS(vp);
+        mountopts = iumfsp->mountopts;
+        req = (request_t *) cntlsoft->bufaddr; // bufaddr の大きさは DEVICE_BUFFER_SIZE
+        /*
+         * ユーザモードデーモンに渡すリクエストを request 構造体にセット
+         */
+        bzero(req, sizeof (request_t));
+        req->request_type = WRITE_REQUEST;
+        strncpy(req->pathname, inp->pathname, IUMFS_MAXPATHLEN); // マウントポイントからの相対パス名
+        bcopy(mountopts, req->mountopts, sizeof (iumfs_mount_opts_t));
+        req->offset = offset; // オフセット
+        req->size = size; // 要求されたサイズ
+        req->datasize = (size & ~7) + ((size & 7) ? 8 : 0); // バッファに追記するデータサイズ(8の倍数)
+        req->datasize = MIN(req->datasize, DEVICE_BUFFER_SIZE - sizeof (request_t)); // バッファサイズを超えてはいけない
+        cntlsoft->bufusedsize = sizeof (request_t) + req->datasize;
+        bcopy(bp->b_un.b_addr, (char *) req + sizeof (request_t), size); 
+        mutex_exit(&cntlsoft->d_lock); // checking
 
-    /*
-     * リクエスト要求を開始する
-     */
-    err = iumfs_daemon_request_start(cntlsoft);
-    if (err) {
-        // エラーが発生した模様。リクエストを解除
+        /*
+         * リクエスト要求を開始する
+         */
+        err = iumfs_daemon_request_start(cntlsoft);
+        if (err) {
+            // エラーが発生した模様。リクエストを解除
+            iumfs_daemon_request_exit(cntlsoft);
+            if (err == EAGAIN){
+                // タイムアウトしてしまったようだ。最初からやり直し。
+                continue;
+            }
+            goto out;
+        }
+
+        /*
+         * リクエストを解除。他の待ち thread を起こす
+         */
         iumfs_daemon_request_exit(cntlsoft);
-        goto out;
-    }
-
-    /*
-     * リクエストを解除。他の待ち thread を起こす
-     */
-    iumfs_daemon_request_exit(cntlsoft);
-    DEBUG_PRINT((CE_CONT, "iumfs_request_write: copy data done\n"));
-
+        DEBUG_PRINT((CE_CONT, "iumfs_request_write: copy data done\n"));
+        done = 1;
+    } while (!done);
+    
 out:
     DEBUG_PRINT((CE_CONT, "iumfs_request_write: return(%d)\n", err));
     return (err);
@@ -880,83 +907,85 @@ int
 iumfs_request_create(vnode_t *dirvp, char *name, vattr_t *vap)
 {
     int err = 0;
-#define SUPPORT_CREATE    
-#ifndef SUPPORT_CREATE        
-    DEBUG_PRINT((CE_CONT, "iumfs_request_create called\n"));
-    err = ENOTSUP;
-#else
     iumfscntl_soft_t *cntlsoft; // iumfscntl デバイスのデバイスステータス構造体
     request_t *req;
     iumfs_t *iumfsp; // ファイルシステム型依存のプライベートデータ構造体
     iumnode_t *dirinp;
     iumfs_mount_opts_t *mountopts;
     iumfs_vattr_t *ivap;
+    int done = 0;
 
     DEBUG_PRINT((CE_CONT, "iumfs_request_create called\n"));
     DEBUG_PRINT((CE_CONT, "iumfs_request_create: filename=%s\n", name));
 
-    /*
-     * オープン中で未使用の iumfscntl デバイスを受け取る。 
-     * もしすべてのデバイスが使用中ならリクエストの順番待ちをする
-     */  
-    if((err = iumfs_daemon_request_enter(&cntlsoft))){
-        goto out;
-    }
+    do {
+        /*
+         * オープン中で未使用の iumfscntl デバイスを受け取る。 
+         * もしすべてのデバイスが使用中ならリクエストの順番待ちをする
+         */  
+        if((err = iumfs_daemon_request_enter(&cntlsoft))){
+            goto out;
+        }
 
-    mutex_enter(&cntlsoft->d_lock);
-    /*
-     * マウントオプション、ファイルシステム依存ノード構造体、ユーザ空間とマッピング
-     * しているメモリアドレスを得る。
-     */
-    dirinp = VNODE2IUMNODE(dirvp);
-    iumfsp = VNODE2IUMFS(dirvp);
-    mountopts = iumfsp->mountopts;
-    req = (request_t *) cntlsoft->bufaddr; // bufaddr の大きさは DEVICE_BUFFER_SIZE
+        mutex_enter(&cntlsoft->d_lock);
+        /*
+         * マウントオプション、ファイルシステム依存ノード構造体、ユーザ空間とマッピング
+         * しているメモリアドレスを得る。
+         */
+        dirinp = VNODE2IUMNODE(dirvp);
+        iumfsp = VNODE2IUMFS(dirvp);
+        mountopts = iumfsp->mountopts;
+        req = (request_t *) cntlsoft->bufaddr; // bufaddr の大きさは DEVICE_BUFFER_SIZE
     
-    /*
-     * ユーザモードデーモンに渡すリクエストを request 構造体にセット
-     */
-    bzero(req, sizeof (request_t));
-    req->request_type = CREATE_REQUEST;
-    if (ISROOT(dirinp->pathname))    
-        snprintf(req->pathname, IUMFS_MAXPATHLEN, "/%s",name);
-    else
-        snprintf(req->pathname, IUMFS_MAXPATHLEN, "%s/%s",dirinp->pathname,name);        
-    bcopy(mountopts, req->mountopts, sizeof (iumfs_mount_opts_t));
-    req->datasize = sizeof(iumfs_vattr_t); // かならず 8の倍数になっているはず
-    cntlsoft->bufusedsize = sizeof (request_t) + req->datasize;
-    ivap = (iumfs_vattr_t*)((char *) req + sizeof (request_t));
-    /*
-     * create から渡された vattr 構造体を iumfs 固有の構造体に当てはめる。
-     */ 
-    ivap->i_mode = vap->va_mode;
-    ivap->i_size = vap->va_size;
-    ivap->i_type =vap->va_type;
-    ivap->mtime_sec = vap->va_mtime.tv_sec;
-    ivap->mtime_nsec = vap->va_mtime.tv_nsec;
-    /*
-     * 最後にopen(2)に渡されたフラグをセット
-     */ 
-    cntlsoft->bufusedsize = sizeof (request_t) + req->datasize;    
-    mutex_exit(&cntlsoft->d_lock); // checking
+        /*
+         * ユーザモードデーモンに渡すリクエストを request 構造体にセット
+         */
+        bzero(req, sizeof (request_t));
+        req->request_type = CREATE_REQUEST;
+        if (ISROOT(dirinp->pathname))    
+            snprintf(req->pathname, IUMFS_MAXPATHLEN, "/%s",name);
+        else
+            snprintf(req->pathname, IUMFS_MAXPATHLEN, "%s/%s",dirinp->pathname,name);        
+        bcopy(mountopts, req->mountopts, sizeof (iumfs_mount_opts_t));
+        req->datasize = sizeof(iumfs_vattr_t); // かならず 8の倍数になっているはず
+        cntlsoft->bufusedsize = sizeof (request_t) + req->datasize;
+        ivap = (iumfs_vattr_t*)((char *) req + sizeof (request_t));
+        /*
+         * create から渡された vattr 構造体を iumfs 固有の構造体に当てはめる。
+         */ 
+        ivap->i_mode = vap->va_mode;
+        ivap->i_size = vap->va_size;
+        ivap->i_type =vap->va_type;
+        ivap->mtime_sec = vap->va_mtime.tv_sec;
+        ivap->mtime_nsec = vap->va_mtime.tv_nsec;
+        /*
+         * 最後にopen(2)に渡されたフラグをセット
+         */ 
+        cntlsoft->bufusedsize = sizeof (request_t) + req->datasize;    
+        mutex_exit(&cntlsoft->d_lock); // checking
 
-    /*
-     * リクエスト要求を開始する
-     */
-    err = iumfs_daemon_request_start(cntlsoft);
-    if (err) {
-        // エラーが発生した模様。リクエストを解除
+        /*
+         * リクエスト要求を開始する
+         */
+        err = iumfs_daemon_request_start(cntlsoft);
+        if (err) {
+            // エラーが発生した模様。リクエストを解除
+            iumfs_daemon_request_exit(cntlsoft);
+            if (err == EAGAIN){
+                // タイムアウトしてしまったようだ。最初からやり直し。
+                continue;
+            }
+            goto out;
+        }    
+
+        /*
+         * リクエストを解除。他の待ち thread を起こす
+         */
         iumfs_daemon_request_exit(cntlsoft);
-        goto out;
-    }
+        DEBUG_PRINT((CE_CONT, "iumfs_request_create: file created\n"));
+        done = 1;
+    } while(!done);
 
-    /*
-     * リクエストを解除。他の待ち thread を起こす
-     */
-    iumfs_daemon_request_exit(cntlsoft);
-    DEBUG_PRINT((CE_CONT, "iumfs_request_create: file created\n"));
-
-#endif    
 out:
     DEBUG_PRINT((CE_CONT, "iumfs_request_create: return(%d)\n", err));
     return (err);
@@ -985,52 +1014,60 @@ iumfs_request_remove(vnode_t *vp)
     iumnode_t *inp;
     iumfs_mount_opts_t *mountopts;
     int err = 0;
+    int done = 0;
 
     DEBUG_PRINT((CE_CONT, "iumfs_request_remove called\n"));
 
-    /*
-     * オープン中で未使用の iumfscntl デバイスを受け取る。 
-     * もしすべてのデバイスが使用中ならリクエストの順番待ちをする
-     */  
-    if((err = iumfs_daemon_request_enter(&cntlsoft))){
-        goto out;
-    }     
+    do {
+        /*
+         * オープン中で未使用の iumfscntl デバイスを受け取る。 
+         * もしすべてのデバイスが使用中ならリクエストの順番待ちをする
+         */  
+        if((err = iumfs_daemon_request_enter(&cntlsoft))){
+            goto out;
+        }     
 
-    mutex_enter(&cntlsoft->d_lock);
-    /*
-     * マウントオプション、ファイルシステム依存ノード構造体、ユーザ空間とマッピング
-     * しているメモリアドレスを得る。
-     */
-    inp = VNODE2IUMNODE(vp);
-    iumfsp = VNODE2IUMFS(vp);
-    mountopts = iumfsp->mountopts;
-    req = (request_t *) cntlsoft->bufaddr;
-    /*
-     * ユーザモードデーモンに渡すリクエストを request 構造体にセット
-     */
-    bzero(req, sizeof (request_t));
-    req->request_type = REMOVE_REQUEST;
-    snprintf(req->pathname, IUMFS_MAXPATHLEN, "%s", inp->pathname); //マウントポイントからの相対パス
-    bcopy(mountopts, req->mountopts, sizeof (iumfs_mount_opts_t));
-    req->datasize = 0;
-    cntlsoft->bufusedsize = sizeof (request_t) + req->datasize;
-    mutex_exit(&cntlsoft->d_lock);
+        mutex_enter(&cntlsoft->d_lock);
+        /*
+         * マウントオプション、ファイルシステム依存ノード構造体、ユーザ空間とマッピング
+         * しているメモリアドレスを得る。
+         */
+        inp = VNODE2IUMNODE(vp);
+        iumfsp = VNODE2IUMFS(vp);
+        mountopts = iumfsp->mountopts;
+        req = (request_t *) cntlsoft->bufaddr;
+        /*
+         * ユーザモードデーモンに渡すリクエストを request 構造体にセット
+         */
+        bzero(req, sizeof (request_t));
+        req->request_type = REMOVE_REQUEST;
+        snprintf(req->pathname, IUMFS_MAXPATHLEN, "%s", inp->pathname); //マウントポイントからの相対パス
+        bcopy(mountopts, req->mountopts, sizeof (iumfs_mount_opts_t));
+        req->datasize = 0;
+        cntlsoft->bufusedsize = sizeof (request_t) + req->datasize;
+        mutex_exit(&cntlsoft->d_lock);
 
-    /*
-     * リクエスト要求を開始する
-     */
-    err = iumfs_daemon_request_start(cntlsoft);
-    if (err) {
-         // エラーが発生した模様。リクエストを解除してエラーリターン
+        /*
+         * リクエスト要求を開始する
+         */
+        err = iumfs_daemon_request_start(cntlsoft);
+        if (err) {
+            // エラーが発生した模様。リクエストを解除
+            iumfs_daemon_request_exit(cntlsoft);
+            if (err == EAGAIN){
+                // タイムアウトしてしまったようだ。最初からやり直し。
+                continue;
+            }
+            goto out;
+        }    
+
+        /*
+         * リクエストを解除。他の待ち thread を起こす
+         */
         iumfs_daemon_request_exit(cntlsoft);
-        goto out;
-    }
-
-    /*
-     * リクエストを解除。他の待ち thread を起こす
-     */
-    iumfs_daemon_request_exit(cntlsoft);
-    DEBUG_PRINT((CE_CONT, "iumfs_request_remove: file removed\n"));
+        DEBUG_PRINT((CE_CONT, "iumfs_request_remove: file removed\n"));
+        done = 1;
+    } while (!done);
     
 out:
     DEBUG_PRINT((CE_CONT, "iumfs_request_remove: return(%d)\n", err));
@@ -1063,67 +1100,76 @@ iumfs_request_mkdir(vnode_t *dirvp, char *name, vattr_t *vap)
     iumfs_mount_opts_t *mountopts;
     iumfs_vattr_t *ivap;
     int err = 0;
+    int done =0;
 
     DEBUG_PRINT((CE_CONT, "iumfs_request_mkdir called\n"));
     DEBUG_PRINT((CE_CONT, "iumfs_request_mkdir: filename=%s\n", name));
 
-    /*
-     * オープン中で未使用の iumfscntl デバイスを受け取る。 
-     * もしすべてのデバイスが使用中ならリクエストの順番待ちをする
-     */  
-    if((err = iumfs_daemon_request_enter(&cntlsoft))){
-        goto out;
-    }
+    do {
+        /*
+         * オープン中で未使用の iumfscntl デバイスを受け取る。 
+         * もしすべてのデバイスが使用中ならリクエストの順番待ちをする
+         */  
+        if((err = iumfs_daemon_request_enter(&cntlsoft))){
+            goto out;
+        }
 
-    mutex_enter(&cntlsoft->d_lock);
-    /*
-     * マウントオプション、ファイルシステム依存ノード構造体、ユーザ空間とマッピング
-     * しているメモリアドレスを得る。
-     */
-    dirinp = VNODE2IUMNODE(dirvp);
-    iumfsp = VNODE2IUMFS(dirvp);
-    mountopts = iumfsp->mountopts;
-    req = (request_t *) cntlsoft->bufaddr; // bufaddr の大きさは DEVICE_BUFFER_SIZE
+        mutex_enter(&cntlsoft->d_lock);
+        /*
+         * マウントオプション、ファイルシステム依存ノード構造体、ユーザ空間とマッピング
+         * しているメモリアドレスを得る。
+         */
+        dirinp = VNODE2IUMNODE(dirvp);
+        iumfsp = VNODE2IUMFS(dirvp);
+        mountopts = iumfsp->mountopts;
+        req = (request_t *) cntlsoft->bufaddr; // bufaddr の大きさは DEVICE_BUFFER_SIZE
 
-    /*
-     * ユーザモードデーモンに渡すリクエストを request 構造体にセット
-     */
-    bzero(req, sizeof (request_t));
-    req->request_type = MKDIR_REQUEST;
-    if (ISROOT(dirinp->pathname))        
-        snprintf(req->pathname, IUMFS_MAXPATHLEN, "/%s",name);
-    else
-        snprintf(req->pathname, IUMFS_MAXPATHLEN, "%s/%s",dirinp->pathname,name);        
-    bcopy(mountopts, req->mountopts, sizeof (iumfs_mount_opts_t));
-    req->datasize = sizeof(iumfs_vattr_t); // かならず 8の倍数になっているはず
-    cntlsoft->bufusedsize = sizeof (request_t) + req->datasize;
-    ivap = (iumfs_vattr_t*)((char *) req + sizeof (request_t));
-    /*
-     * iumfs_mkdir で受け取った vattr 構造体を iumfs 固有の構造体に当てはめる。
-     */ 
-    ivap->i_mode = vap->va_mode;
-    ivap->i_size = vap->va_size;
-    ivap->i_type =vap->va_type;
-    ivap->mtime_sec = vap->va_mtime.tv_sec;
-    ivap->mtime_nsec = vap->va_mtime.tv_nsec;
-    cntlsoft->bufusedsize = sizeof (request_t) + req->datasize;    
-    mutex_exit(&cntlsoft->d_lock); // checking
+        /*
+         * ユーザモードデーモンに渡すリクエストを request 構造体にセット
+         */
+        bzero(req, sizeof (request_t));
+        req->request_type = MKDIR_REQUEST;
+        if (ISROOT(dirinp->pathname))        
+            snprintf(req->pathname, IUMFS_MAXPATHLEN, "/%s",name);
+        else
+            snprintf(req->pathname, IUMFS_MAXPATHLEN, "%s/%s",dirinp->pathname,name);        
+        bcopy(mountopts, req->mountopts, sizeof (iumfs_mount_opts_t));
+        req->datasize = sizeof(iumfs_vattr_t); // かならず 8の倍数になっているはず
+        cntlsoft->bufusedsize = sizeof (request_t) + req->datasize;
+        ivap = (iumfs_vattr_t*)((char *) req + sizeof (request_t));
+        /*
+         * iumfs_mkdir で受け取った vattr 構造体を iumfs 固有の構造体に当てはめる。
+         */ 
+        ivap->i_mode = vap->va_mode;
+        ivap->i_size = vap->va_size;
+        ivap->i_type =vap->va_type;
+        ivap->mtime_sec = vap->va_mtime.tv_sec;
+        ivap->mtime_nsec = vap->va_mtime.tv_nsec;
+        cntlsoft->bufusedsize = sizeof (request_t) + req->datasize;    
+        mutex_exit(&cntlsoft->d_lock); // checking
 
-    /*
-     * リクエスト要求を開始する
-     */
-    err = iumfs_daemon_request_start(cntlsoft);
-    if (err) {
-        // エラーが発生した模様。リクエストを解除
+        /*
+         * リクエスト要求を開始する
+         */
+        err = iumfs_daemon_request_start(cntlsoft);
+        if (err) {
+            // エラーが発生した模様。リクエストを解除
+            iumfs_daemon_request_exit(cntlsoft);
+            if (err == EAGAIN){
+                // タイムアウトしてしまったようだ。最初からやり直し。
+                continue;
+            }
+            goto out;
+        }
+
+        /*
+         * リクエストを解除。他の待ち thread を起こす
+         */
         iumfs_daemon_request_exit(cntlsoft);
-        goto out;
-    }
-
-    /*
-     * リクエストを解除。他の待ち thread を起こす
-     */
-    iumfs_daemon_request_exit(cntlsoft);
-    DEBUG_PRINT((CE_CONT, "iumfs_request_mkdir: directory created\n"));
+        DEBUG_PRINT((CE_CONT, "iumfs_request_mkdir: directory created\n"));
+        done = 1;
+    } while(!done);
+    
   out:    
     DEBUG_PRINT((CE_CONT, "iumfs_request_mkdir: return(%d)\n", err));
     return (err);
@@ -1151,52 +1197,60 @@ iumfs_request_rmdir(vnode_t *vp)
     iumnode_t *inp;
     iumfs_mount_opts_t *mountopts;
     int err = 0;
+    int done = 0;
 
     DEBUG_PRINT((CE_CONT, "iumfs_request_rmdir called\n"));
 
-    /*
-     * オープン中で未使用の iumfscntl デバイスを受け取る。 
-     * もしすべてのデバイスが使用中ならリクエストの順番待ちをする
-     */  
-    if((err = iumfs_daemon_request_enter(&cntlsoft))){
-        goto out;
-    }
+    do {
+        /*
+         * オープン中で未使用の iumfscntl デバイスを受け取る。 
+         * もしすべてのデバイスが使用中ならリクエストの順番待ちをする
+         */  
+        if((err = iumfs_daemon_request_enter(&cntlsoft))){
+            goto out;
+        }
 
-    mutex_enter(&cntlsoft->d_lock);
-    /*
-     * マウントオプション、ファイルシステム依存ノード構造体、ユーザ空間とマッピング
-     * しているメモリアドレスを得る。
-     */
-    inp = VNODE2IUMNODE(vp);
-    iumfsp = VNODE2IUMFS(vp);
-    mountopts = iumfsp->mountopts;
-    req = (request_t *) cntlsoft->bufaddr;
-    /*
-     * ユーザモードデーモンに渡すリクエストを request 構造体にセット
-     */
-    bzero(req, sizeof (request_t));
-    req->request_type = RMDIR_REQUEST;
-    snprintf(req->pathname, IUMFS_MAXPATHLEN, "%s", inp->pathname); //マウントポイントからの相対パス
-    bcopy(mountopts, req->mountopts, sizeof (iumfs_mount_opts_t));
-    req->datasize = 0;
-    cntlsoft->bufusedsize = sizeof (request_t) + req->datasize;
-    mutex_exit(&cntlsoft->d_lock);
+        mutex_enter(&cntlsoft->d_lock);
+        /*
+         * マウントオプション、ファイルシステム依存ノード構造体、ユーザ空間とマッピング
+         * しているメモリアドレスを得る。
+         */
+        inp = VNODE2IUMNODE(vp);
+        iumfsp = VNODE2IUMFS(vp);
+        mountopts = iumfsp->mountopts;
+        req = (request_t *) cntlsoft->bufaddr;
+        /*
+         * ユーザモードデーモンに渡すリクエストを request 構造体にセット
+         */
+        bzero(req, sizeof (request_t));
+        req->request_type = RMDIR_REQUEST;
+        snprintf(req->pathname, IUMFS_MAXPATHLEN, "%s", inp->pathname); //マウントポイントからの相対パス
+        bcopy(mountopts, req->mountopts, sizeof (iumfs_mount_opts_t));
+        req->datasize = 0;
+        cntlsoft->bufusedsize = sizeof (request_t) + req->datasize;
+        mutex_exit(&cntlsoft->d_lock);
 
-    /*
-     * リクエスト要求を開始する
-     */
-    err = iumfs_daemon_request_start(cntlsoft);
-    if (err) {
-         // エラーが発生した模様。リクエストを解除してエラーリターン
+        /*
+         * リクエスト要求を開始する
+         */
+        err = iumfs_daemon_request_start(cntlsoft);
+        if (err) {
+            // エラーが発生した模様。リクエストを解除
+            iumfs_daemon_request_exit(cntlsoft);
+            if (err == EAGAIN){
+                // タイムアウトしてしまったようだ。最初からやり直し。
+                continue;
+            }
+            goto out;    
+        }
+
+        /*
+         * リクエストを解除。他の待ち thread を起こす
+         */
         iumfs_daemon_request_exit(cntlsoft);
-        goto out;
-    }
-
-    /*
-     * リクエストを解除。他の待ち thread を起こす
-     */
-    iumfs_daemon_request_exit(cntlsoft);
-    DEBUG_PRINT((CE_CONT, "iumfs_request_rmdir: directory removed\n"));
+        DEBUG_PRINT((CE_CONT, "iumfs_request_rmdir: directory removed\n"));
+        done = 1;
+    } while (!done);
     
 out:
     DEBUG_PRINT((CE_CONT, "iumfs_request_rmdir return(%d)\n", err));
