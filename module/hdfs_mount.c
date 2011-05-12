@@ -127,7 +127,7 @@ main(int argc, char *argv[])
      */
     
     if((server_and_path = strstr(resource, "://")) == NULL){
-        printf("Invalid URL\n");        
+        printf("No protocol specified\n");        
         print_usage(argv[0]);
     }
     server_and_path += 4;
