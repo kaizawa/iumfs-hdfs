@@ -122,7 +122,8 @@ do_build(){
 }
 
 do_mount () {
-    sudo mount -F iumfs ${base} ${mnt} >> $LOGFILE 2>&1
+    echo "mount -F iumfs ${1}${base} ${mnt}"
+    sudo mount -F iumfs ${1}${base} ${mnt} >> $LOGFILE 2>&1
     return $?
 }
 
@@ -162,12 +163,11 @@ kill_daemon(){
 }
 
 exec_mount_test () {
-	target=$1
 
         for target in mount umount
         do
    	   cmd="do_${target}" 
-	   $cmd  >> $LOGFILE 2>&1
+	   $cmd  $1 >> $LOGFILE 2>&1
 	   if [ "$?" -eq "0" ]; then
 		echo "${target} test: \tpass" 
 	   else
@@ -225,16 +225,16 @@ do_basic_test(){
 
 do_create_and_delete(){
      filename=$RANDOM
-     start=`date +'%s'`
+     start=`get_second`
      count=0
      cd ${mnt}
      while :
      do
-         current=`date +'%s'`
+         count=`expr $count + 1`
+         current=`get_second`
          elapsed=`expr $current - $start`
          throughput=`echo "$count/$elapsed" | bc -l 2>/dev/null` 
          echo "$count $elapsed $throughput" > $LOGDIR/throughput.$filename
-         count=`expr $count + 1`
          echo $filename > $filename
 	 if [ "$?" -ne 0 ]; then
 	     echo "do_create_and_delete: cannot create $filenme." | tee >> $LOGFILE 2>&1
@@ -247,6 +247,11 @@ do_create_and_delete(){
              continue
 	 fi
      done
+}
+
+get_second (){
+    date '+%H %M %S' | read hour minute second
+    echo "$hour*60*60+$minute*60+$second" | bc
 }
 
 do_stress_test(){
@@ -282,17 +287,21 @@ main() {
     echo "##"
     echo "## Start mount test."
     echo "##"
-    exec_mount_test
+
 
     case "$1" in
         'hdfs')
+            echo "Please erenter Nodename:"
+            read nodename
+            exec_mount_test "hdfs://$nodename"
             init_hdfs
-            do_mount    
+            do_mount "hdfs://$nodename"
             start_hdfsd
             ;;
         'fstest')
+            exec_mount_test "files://localhost"
             init_fstest
-            do_mount
+            do_mount "files://localhost"
             start_fstestd
             ;;
          *)
