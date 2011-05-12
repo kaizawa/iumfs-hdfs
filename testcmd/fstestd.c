@@ -136,6 +136,19 @@ main(int argc, char *argv[])
         }
     }
 
+    /*
+     * ここまではとりあえず、フォアグラウンドで実行。
+     * ここからは、デバッグレベル 0 （デフォルト）なら、バックグラウンド
+     * で実行し、そうでなければフォアグラウンド続行。
+     */
+    if (debuglevel == 0) {
+        PRINT_ERR((LOG_INFO, "Going to background mode\n"));
+        if (become_daemon() != 0) {
+            print_err(LOG_ERR, "can't become daemon\n");
+            return(NULL);
+        }
+    }    
+
     for ( i = 0 ; i < MAX_THREADS ; i++)
         pthread_create(&tid[i], NULL, request_loop, (void *) &tid[i]);
     for ( i = 0 ; i < MAX_THREADS ; i++)
@@ -193,18 +206,6 @@ request_loop(void *arg)
 
     sigignore(SIGPIPE);
 
-    /*
-     * ここまではとりあえず、フォアグラウンドで実行。
-     * ここからは、デバッグレベル 0 （デフォルト）なら、バックグラウンド
-     * で実行し、そうでなければフォアグラウンド続行。
-     */
-    if (debuglevel == 0) {
-        PRINT_ERR((LOG_INFO, "Going to background mode\n"));
-        if (become_daemon() != 0) {
-            print_err(LOG_ERR, "can't become daemon\n");
-            return(NULL);
-        }
-    }
 
     FD_ZERO(&fds);
     FD_ZERO(&err_fds);
