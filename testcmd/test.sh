@@ -31,7 +31,7 @@
 # You will be prompted password for root user.
 #
 procs=3 # number of processes for stress test
-stresstime=30 # number of seconds for stress test
+stresstime=3000 # number of seconds for stress test
 daemonpid=""
 mnt="/var/tmp/iumfsmnt"
 base="/var/tmp/iumfsbase"
@@ -122,7 +122,6 @@ do_build(){
 }
 
 do_mount () {
-    echo "mount -F iumfs ${1}${base} ${mnt}"
     sudo mount -F iumfs ${1}${base} ${mnt} >> $LOGFILE 2>&1
     return $?
 }
@@ -202,9 +201,9 @@ fini() {
         echo "## Finished."
         echo "##"
         echo "See log files for detail."
-        echo "\t$LOGFILE"
-        echo "\t$LOGDIR/fstestd.log"
-        echo "\t$LOGDIR/hdfsd.log"
+        echo "$LOGFILE"
+        echo "$LOGDIR/fstestd.log"
+        echo "$LOGDIR/hdfsd.log"
         exit 0
 }
 
