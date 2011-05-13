@@ -81,6 +81,7 @@ install:
 	$(INSTALL) -d -m 0755 -o root -g bin /usr/lib/fs/iumfs
 	-$(INSTALL) -m 0755 -o root -g bin mount /usr/lib/fs/iumfs
 	$(INSTALL) -d -m 0755 -o root -g bin /usr/local/bin
+	-$(INSTALL) -m 0644 -o root -g bin iumfs.h /usr/include/sys
 
 uninstall:
 	-$(REM_DRV) iumfs
@@ -89,6 +90,7 @@ uninstall:
 	-$(RM) $(DRV_CONF_DIR)/iumfs.conf
 	-$(RM) /usr/lib/fs/iumfs/mount
 	-$(RM) -rf /usr/lib/fs/iumfs
+	-$(RM) -rf /usr/include/sys/iumfs.h
 
 reinstall: uninstall install
 
