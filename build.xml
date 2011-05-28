@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 
-<project name="hdfsd" default="dist" basedir=".">
+<project name="iumfs-hdfs" basedir=".">
   <import file="cmd/build.xml"/>
 </project>
 
