@@ -4,12 +4,10 @@
   <property name="src" value="./src"/>
   <property name="build" value="./build"/>
   <property name="dist" value="./"/>
-  <property environment="env" />
+  <property environment="env"/>
+  <property name="hadoop.home" value="${env.HADOOP_HOME}" />
   <path id="class.path">
-<!--
-      <fileset dir="${env.HADOOP_HOME}">
--->
-      <fileset dir="/usr/local/hadoop">
+      <fileset dir="${hadoop.home}">
          <include name="*.jar" />
       </fileset>  
   </path>
@@ -22,6 +20,9 @@
   <target name="compile">
     <javac srcdir="${src}" destdir="${build}" debug="true" debuglevel="lines,vars,source" classpathref="class.path" encoding="utf8">
     </javac>
+  </target>
+  <target name="test" depends="dist">
+    <exec dir="../hdfs-test" executable="./test.sh"/>
   </target>
 </project>
 
