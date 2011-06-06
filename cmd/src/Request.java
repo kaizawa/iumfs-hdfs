@@ -64,6 +64,7 @@ public abstract class Request {
     final public static int EIO = 5;
     final public static int EEXIST = 17;    
     final public static int ENOTSUP = 48;
+    final public static int EINVAL = 22;
 
     private long request_type;
     private long size;

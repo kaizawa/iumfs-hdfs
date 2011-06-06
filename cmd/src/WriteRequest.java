@@ -56,12 +56,18 @@ public class WriteRequest extends Request {
                 // ファイルサイズ未満のデータ書き込み要求。すなわち変更。
                 setResponseHeader(ENOTSUP, 0);
                 return;
-            }            
+            }
+
             FSDataOutputStream fsdos = hdfs.append(getFullPath());
             /*
              * ファイルの最後に/サイズのデータを書き込み用バッファに読み込む
              * 現在はオフセットの指定はできず Append だけ。
              */
+            if(offset > filesize){
+                // オフセットがファイルサイズを超える要求。
+                setResponseHeader(ENOTSUP, 0);
+                return;
+            }            
             fsdos.write(getData(filesize - offset, size));
             fsdos.close();
             /*
@@ -76,7 +82,12 @@ public class WriteRequest extends Request {
             logger.fine("IOException happend when writing");
             ex.printStackTrace();
             setResponseHeader(ENOTSUP, 0);
+        } catch (ArrayIndexOutOfBoundsException ex){
+            logger.fine("ArrayIndexOutOfBoundsException happend when writing");
+            ex.printStackTrace();
+            setResponseHeader(EINVAL, 0); 
         }
+        
     }
 }
 
