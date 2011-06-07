@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<project name="iumfs-hdfs" basedir=".">
-  <import file="cmd/build.xml"/>
+<project name="hdfs" default="dist" basedir=".">
+  <target name="dist">
+     <ant dir="cmd" target="dist"/>
+  </target>
 </project>
