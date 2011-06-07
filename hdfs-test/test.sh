@@ -257,7 +257,7 @@ main() {
 
     init
 
-    printf "Please erenter DataNode name: "
+    printf "Please enter NameNode: "
     read nodename
 
     echo "##"
