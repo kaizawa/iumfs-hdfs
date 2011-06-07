@@ -57,7 +57,6 @@ public class WriteRequest extends Request {
                 setResponseHeader(ENOTSUP, 0);
                 return;
             }
-
             FSDataOutputStream fsdos = hdfs.append(getFullPath());
             /*
              * ファイルの最後に/サイズのデータを書き込み用バッファに読み込む
@@ -65,10 +64,13 @@ public class WriteRequest extends Request {
              */
             if(offset > filesize){
                 // オフセットがファイルサイズを超える要求。
-                setResponseHeader(ENOTSUP, 0);
-                return;
-            }            
-            fsdos.write(getData(filesize - offset, size));
+                // まず、空白部分を null で埋める。
+                fsdos.write(new byte[(int)(offset - filesize)]);
+                fsdos.write(getData(0, size));
+            } else {
+                // オフセットがファイルサイズ未満の要求。
+                fsdos.write(getData(filesize - offset, size));
+            }
             fsdos.close();
             /*
              * レスポンスヘッダをセット
