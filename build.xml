@@ -3,4 +3,7 @@
   <target name="jar">
      <ant dir="cmd" target="jar"/>
   </target>
+ <target name="clean">
+      <ant dir="cmd" target="clean"/>
+  </target>
 </project>
