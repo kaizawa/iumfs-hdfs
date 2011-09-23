@@ -1,3 +1,5 @@
+package iumfs.hdfs;
+
 /*
  * Copyright 2010 Kazuyoshi Aizawa
  *
@@ -13,16 +15,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package iumfs;
+
+import iumfs.IumfsFile;
+import iumfs.MkdirRequest;
 
 /**
- * UnknownRequestException thatis thrown by daemon
- * when it detects un-supported request type.
+ * <p>HDFS 上にディレクトリを作成し、結果をレスポンスヘッダをセットする</p>
  */
-public class InvalidUserException extends RuntimeException {
-
-    public InvalidUserException(String string) {
-        super(string);
-    }
-
+class HdfsMkdirRequest extends MkdirRequest {   
+    
+    @Override
+    public IumfsFile getFile() {
+        return HdfsFile.getFile(getServer(), getPathname());
+    }   
 }

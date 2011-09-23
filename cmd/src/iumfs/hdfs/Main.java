@@ -1,3 +1,5 @@
+package iumfs.hdfs;
+
 /*
  * Copyright 2010 Kazuyoshi Aizawa
  *
@@ -14,14 +16,6 @@
  * limitations under the License.
  */
 
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.RandomAccessFile;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.nio.channels.FileChannel;
 import java.util.logging.Logger;
 
 /** 
@@ -38,13 +32,19 @@ import java.util.logging.Logger;
  * ${HADOOPHOME}/lib/commons-loggin-xxx.jar
  * ${HADOOPHOME}/conf  .... core-site.xml
  */
-public class hdfsd {
-    private static Logger logger = Logger.getLogger(hdfsd.class.getName());
+public class Main {
+    static final String version = "0.1.1";  // version
+    private static final Logger logger = Logger.getLogger(Main.class.getName());
     private static final int maxThreads = 4;
 
     public static void main(String args[]) {
-        for(int i = 0 ; i < maxThreads ; i++){
-            new DaemonThread().start();
-        }
+        Main instance = new Main();
+        instance.startDaemonThreads();
     }
+    
+    public void startDaemonThreads() {
+        for (int i = 0; i <  maxThreads ; i++) {
+            new HdfsDaemonThread("HdfsDaemonThread").start();            
+        }
+    }    
 }            

@@ -1,3 +1,5 @@
+package iumfs.hdfs;
+
 /*
  * Copyright 2010 Kazuyoshi Aizawa
  *
@@ -13,25 +15,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package iumfs;
 
-import java.io.FileNotFoundException;
-import java.io.IOException;
+import iumfs.IumfsFile;
+import iumfs.ReadDirRequest;
 
 /**
- * <p>Write Request class</p>
+ *  READDIR request
  */
-public abstract class WriteRequest extends Request {
-
-    private static final String CONT = "(cont) ";
-
+class HdfsReadDirRequest extends ReadDirRequest {
+    
     @Override
-    public void execute() throws FileNotFoundException, IOException {
-        File file = getFile();
-        file.write(getData(), getSize(), getOffset());
-        /*
-         * Set response header
-         */
-        setResponseHeader(SUCCESS, 0);
+    public IumfsFile getFile() {
+        return HdfsFile.getFile(getServer(), getPathname());
     }
 }

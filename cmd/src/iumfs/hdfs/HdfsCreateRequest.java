@@ -1,3 +1,5 @@
+package iumfs.hdfs;
+
 /*
  * Copyright 2010 Kazuyoshi Aizawa
  *
@@ -13,17 +15,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package iumfs;
+
+import iumfs.CreateRequest;
+import iumfs.IumfsFile;
 
 /**
- * <p>MKDIR Reuqest class</p>
+ * <p>CREATE リクエストを表すクラス</p>
  */
-public abstract class MkdirRequest extends Request{
-    /**
-     * Create new Directory
-     */
+class HdfsCreateRequest extends CreateRequest {
+
     @Override
-    public void execute() {
-        setResponseHeader(ENOTSUP, 0);        
+    public IumfsFile getFile() {
+        return HdfsFile.getFile(getServer(), getPathname());
     }
 }

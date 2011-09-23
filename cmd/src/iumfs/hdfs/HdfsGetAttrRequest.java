@@ -1,3 +1,5 @@
+package iumfs.hdfs;
+
 /*
  * Copyright 2010 Kazuyoshi Aizawa
  *
@@ -14,10 +16,20 @@
  * limitations under the License.
  */
 
-/**
- * UnknownRequestException thatis thrown by iumfsd daemon
- * when it detects un-supported request type.
- */
-public class UnknownRequestException extends RuntimeException {
+import iumfs.IumfsFile;
+import iumfs.GetAttrRequest;
+import org.apache.hadoop.fs.FileStatus;
+import org.apache.hadoop.fs.FileSystem;
 
+/**
+ *  GETATTR リクエストを表すクラス
+ */
+class HdfsGetAttrRequest extends GetAttrRequest {
+
+    final public static int ATTR_DATA_LEN = 72; // long x 9 フィールド
+
+    @Override
+    public IumfsFile getFile() {
+        return HdfsFile.getFile(getServer(), getPathname());
+    }
 }

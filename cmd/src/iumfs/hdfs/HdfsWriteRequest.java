@@ -1,5 +1,7 @@
+package iumfs.hdfs;
+
 /*
- * Copyright 2011 Kazuyoshi Aizawa
+ * Copyright 2010 Kazuyoshi Aizawa
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,17 +15,19 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package iumfs;
+
+import iumfs.IumfsFile;
+import iumfs.WriteRequest;
+import java.io.IOException;
 
 /**
- *  RMDIR request class
+ * <p>Write request</p>
  */
-public abstract class RmdirRequest extends Request {
-    /**
-     * remove directory
-     */
+public class HdfsWriteRequest extends WriteRequest {
+   
     @Override
-    public void execute() {
-        throw new NotSupportedException();
-    }
+    public IumfsFile getFile() {
+        return HdfsFile.getFile(getServer(), getPathname());
+    }      
 }
+

@@ -1,3 +1,5 @@
+package iumfs.hdfs;
+
 /*
  * Copyright 2010 Kazuyoshi Aizawa
  *
@@ -14,19 +16,17 @@
  * limitations under the License.
  */
 
-import java.io.IOException;
-import org.apache.hadoop.fs.FileSystem;
+import iumfs.IumfsFile;
+import iumfs.RmdirRequest;
 
 /**
- *  RMDIRリクエストを表すクラス
+ *  RMDIR繝ｪ繧ｯ繧ｨ繧ｹ繝医ｒ陦ｨ縺吶け繝ｩ繧ｹ
  */
-class RmdirRequest extends Request {
-
+class HdfsRmdirRequest extends RmdirRequest {
     /**
-     * Hadoop HDFS 上のディレクトリを削除し、結果をレスポンスヘッダをセットする
-     */
+     * Hadoop HDFS 荳翫�繝�ぅ繝ｬ繧ｯ繝医Μ繧貞炎髯､縺励�邨先棡繧偵Ξ繧ｹ繝昴Φ繧ｹ繝倥ャ繝�ｒ繧ｻ繝�ヨ縺吶ｋ
     @Override
-    public void process() {
+    public void execute() {
         FileSystem hdfs = getFileSystem();
         try {
             if (hdfs.delete(getFullPath(), true) == false) {
@@ -34,9 +34,7 @@ class RmdirRequest extends Request {
                 setResponseHeader(EIO, 0);
                 return;
             }
-            /*
-             * レスポンスヘッダをセット
-             */
+
             setResponseHeader(SUCCESS, 0);
         } catch (IOException ex) {
             logger.fine("IOException happend when removing directory " + getFullPath());
@@ -44,4 +42,10 @@ class RmdirRequest extends Request {
             setResponseHeader(EIO, 0);
         }
     }
+     */ 
+    
+    @Override
+    public IumfsFile getFile() {
+        return HdfsFile.getFile(getServer(), getPathname());
+    }       
 }

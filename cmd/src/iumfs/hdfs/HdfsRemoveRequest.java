@@ -1,3 +1,5 @@
+package iumfs.hdfs;
+
 /*
  * Copyright 2010 Kazuyoshi Aizawa
  *
@@ -13,11 +15,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package iumfs;
+
+import iumfs.IumfsFile;
+import iumfs.RemoveRequest;
 
 /**
- * Exception which express that requested operation is not supported
+ *  REMOVE Request
  */
-public class NotSupportedException extends RuntimeException {
-
+class HdfsRemoveRequest extends RemoveRequest {
+    
+    @Override
+    public IumfsFile getFile() {
+        return HdfsFile.getFile(getServer(), getPathname());
+    }       
 }

@@ -1,5 +1,3 @@
-package iumfs;
-
 /*
  * Copyright 2010 Kazuyoshi Aizawa
  *
@@ -15,11 +13,22 @@ package iumfs;
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package iumfs.hdfs;
 
-/**
- * UnknownRequestException thatis thrown by iumfsd daemon
- * when it detects un-supported request type.
+import iumfs.ControlDevicePollingThread;
+import iumfs.RequestFactory;
+
+/** 
+ * Worker Thread which opens iumfscntl device and communicate with data node.
  */
-public class UnknownRequestException extends RuntimeException {
+public class HdfsDaemonThread extends ControlDevicePollingThread {
 
-}
+    public HdfsDaemonThread(String name){
+        super(name);
+    }
+    
+    @Override
+    protected RequestFactory getFactory() {
+        return new HdfsRequestFactory();
+    }
+}            
