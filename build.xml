@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<project name="hdfs" default="dist" basedir=".">
-  <target name="dist">
-     <ant dir="cmd" target="dist"/>
+<project name="hdfs" default="jar" basedir=".">
+  <target name="jar">
+     <ant dir="cmd" target="jar"/>
   </target>
 </project>

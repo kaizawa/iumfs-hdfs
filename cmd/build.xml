@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 
-<project name="hdfsd" default="dist" basedir=".">
+<project name="hdfsd" default="jar" basedir=".">
   <property name="src" value="./src"/>
   <property name="build" value="./build"/>
   <property name="dist" value="./"/>
@@ -16,7 +16,7 @@
       </fileset>
   </path>
 
-  <target name="dist" depends="compile">
+  <target name="jar" depends="compile">
     <jar manifest="manifest" jarfile="${dist}/hdfsd.jar" basedir="${build}" >
       <include name="**/*.class"/>
       <include name="**/log.properties"/>
@@ -26,7 +26,7 @@
     <javac srcdir="${src}" destdir="${build}" debug="true" debuglevel="lines,vars,source" classpathref="class.path" encoding="utf8">
     </javac>
   </target>
-  <target name="test" depends="dist">
+  <target name="test" depends="jar">
     <exec dir="../hdfs-test" executable="./test.sh"/>
   </target>
 </project>
