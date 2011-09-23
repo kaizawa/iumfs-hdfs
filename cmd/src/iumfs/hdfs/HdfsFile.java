@@ -182,7 +182,7 @@ public class HdfsFile extends IumfsFile {
         for (FileStatus fstat : fstats) {
             filelist.add(new File(fstat.getPath().getName()));
         }
-        return (File[]) filelist.toArray();
+        return filelist.toArray(new File[0]);
     }
 
     @Override
