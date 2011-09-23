@@ -6,11 +6,19 @@
   <property name="dist" value="./"/>
   <property environment="env"/>
   <property name="hadoop.home" value="${env.HADOOP_HOME}" />
+  <property name="lib" value="lib"/>
   <path id="class.path">
       <fileset dir="${hadoop.home}">
          <include name="*.jar" />
       </fileset>  
   </path>
+  <property environment="env"/>
+  <path id="class.path">
+      <fileset dir="${lib}">
+         <include name="*.jar" />
+      </fileset>
+  </path>
+
   <target name="dist" depends="compile">
     <jar manifest="manifest" jarfile="${dist}/hdfsd.jar" basedir="${build}" >
       <include name="**/*.class"/>
