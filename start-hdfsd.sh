@@ -10,5 +10,5 @@ ${HADOOP_HOME}/lib/commons-lang-2.4.jar:\
 ${HADOOP_HOME}/lib/commons-configuration-1.6.jar:\
 ${HADOOP_HOME}/lib/commons-logging-1.1.1.jar"
 
-hadoop -Djava.util.logging.config.file=log.prop -cp $CLASSPATH iumfs.hdfs.Main
-#hadoop -cp $CLASSPATH hdfsd 
+hadoop -Djava.util.logging.config.file=cmd/log.prop -cp $CLASSPATH iumfs.hdfs.Main 
+#hadoop -cp $CLASSPATH iumfs.hdfs.Main
