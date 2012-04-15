@@ -31,6 +31,7 @@ import iumfs.Request;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.logging.Level;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.Path;
@@ -187,7 +188,15 @@ public class HdfsFile extends IumfsFile {
 
     @Override
     public long getFileType() {
-        throw new UnsupportedOperationException("Not supported yet.");
+        try{
+            if(fs.getFileStatus(new Path(getPath())).isDir()){
+                return IumfsFile.VDIR;
+            } else {
+                return IumfsFile.VREG;
+            }
+        } catch (IOException ex) {
+            return IumfsFile.VREG;
+        }
     }
 
     @Override
@@ -201,7 +210,11 @@ public class HdfsFile extends IumfsFile {
 
     @Override
     public boolean isDirectory() {
-        throw new UnsupportedOperationException("Not supported yet.");
+        try {
+            return fs.getFileStatus(new Path(getPath())).isDir();
+        } catch (IOException ex) {
+            return false;
+        }
     }
 
     /**
