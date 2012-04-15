@@ -38,8 +38,10 @@ mnt="/var/tmp/iumfsmnt"
 base="/var/tmp/iumfsbase"
 CLASSPATH="\
 ./cmd/hdfsd.jar:${HADOOP_HOME}/conf:\
-${HADOOP_HOME}/hadoop-common-0.21.0.jar:\
-${HADOOP_HOME}/hadoop-hdfs-0.21.0.jar:\
+./cmd/lib/iumfs-daemon-core.jar:\
+${HADOOP_HOME}/hadoop-core-1.0.1.jar:\
+${HADOOP_HOME}/lib/commons-lang-2.4.jar:\
+${HADOOP_HOME}/lib/commons-configuration-1.6.jar:\
 ${HADOOP_HOME}/lib/commons-logging-1.1.1.jar"
 
 
@@ -69,17 +71,17 @@ init (){
 }
 
 init_hdfs (){
-       if [ ! -f "${HADOOP_HOME}/hadoop-common-0.21.0.jar" ]; then
-           echo "Can't find hadoop-common-0.21.0.jar. HADOOP_HOME might not be set correctly."
+       if [ ! -f "${HADOOP_HOME}/hadoop-core-1.0.1.jar" ]; then
+           echo "Can't find hadoop-core-1.0.1.jar. HADOOP_HOME might not be set correctly."
            exit 1
        fi
         echo "##"
         echo "## Preparing required directory for test."
         echo "##"
 	# Just in case, remove existing test dir
-        hdfs dfs -rmr ${base}  >> $TESTLOGFILE 2>&1
+        hadoop dfs -rmr ${base}  >> $TESTLOGFILE 2>&1
         # Create mount base directory 
-        hdfs dfs -mkdir ${base}  >> $TESTLOGFILE 2>&1
+        hadoop dfs -mkdir ${base}  >> $TESTLOGFILE 2>&1
 	if [ "$?" -ne "0" ]; then
 	    echo "Can't create new directory on HDFS. See $TESTLOGFILE" 
 	    fini 1	
@@ -121,7 +123,7 @@ do_umount() {
 }
 
 start_hdfsd() {
-        hadoop -Djava.util.logging.config.file=log.prop -cp $CLASSPATH  hdfsd > $DAEMONLOGFILE 2>&1 &
+        hadoop -Djava.util.logging.config.file=log.prop -cp $CLASSPATH  iumfs.hdfs.Main > $DAEMONLOGFILE 2>&1 &
 	if [ "$?" -eq 0 ]; then
 		daemonpid=$! 
 		return 0		
@@ -130,7 +132,7 @@ start_hdfsd() {
 }
 
 kill_daemon(){
-        pid=`jps 2>/dev/null |grep hdfsd | awk '{print $1}'`
+        pid=`jps 2>/dev/null |grep hdfs | awk '{print $1}'`
         if [ "$pid" -ne "" ]; then
              sudo kill $pid >> $TESTLOGFILE 2>&1
         fi

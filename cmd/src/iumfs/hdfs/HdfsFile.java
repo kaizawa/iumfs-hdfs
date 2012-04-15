@@ -192,7 +192,11 @@ public class HdfsFile extends IumfsFile {
 
     @Override
     public long getPermission() {
-        throw new UnsupportedOperationException("Not supported yet.");
+        if(isDirectory()){
+            return (long) 0040755; // directory
+        } else {
+            return (long) 0100444; // regular file      
+        }
     }
 
     @Override
