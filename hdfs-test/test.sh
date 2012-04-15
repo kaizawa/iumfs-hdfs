@@ -123,7 +123,7 @@ do_umount() {
 }
 
 start_hdfsd() {
-        hadoop -Djava.util.logging.config.file=log.prop -cp $CLASSPATH  iumfs.hdfs.Main > $DAEMONLOGFILE 2>&1 &
+        hadoop -Djava.util.logging.config.file=cmd/log.prop -cp $CLASSPATH  iumfs.hdfs.Main > $DAEMONLOGFILE 2>&1 &
 	if [ "$?" -eq 0 ]; then
 		daemonpid=$! 
 		return 0		
