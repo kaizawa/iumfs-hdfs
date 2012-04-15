@@ -140,7 +140,7 @@ public class HdfsFile extends IumfsFile {
                 logger.fine("cannot create directory");
                 return false;
             }
-            return false;
+            return true; 
         } catch (IOException ex) {
             /*
              * can't throw IOException here.
