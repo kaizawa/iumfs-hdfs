@@ -49,16 +49,7 @@ public class HdfsFile extends IumfsFile {
     HdfsFile(String server, String pathname) {
         super(pathname);
         this.server = server;
-        fs = getFileSystem(server);
-        try {
-            Configuration conf = new Configuration();
-            conf.set("fs.defaultFS", server);
-            logger.finer("server=" + server);
-            fs = FileSystem.get(conf);
-        } catch (IOException ex) {
-            ex.printStackTrace();
-            System.exit(1);
-        }
+        fs = getFileSystem();
         Date now = new Date();
         setAtime(now.getTime());
         setCtime(now.getTime());
@@ -83,18 +74,15 @@ public class HdfsFile extends IumfsFile {
         long filesize = fstat.getLen();
 
         /*
-         * この iumfscntl から受け取る write リクエストのオフセット値
-         * は必ず PAGE 境界上。そして受け取るデータは PAGE 境界からの
-         * データ。（既存データ含む)
-         * 
-         *        PAGESIZE              PAGESIZE
-         *  |---------------------|---------------------|
-         *  |<---------- filesize -------->|
-         *  |<---- offset ------->|<-- size --->|
+         * この iumfscntl から受け取る write リクエストのオフセット値 は必ず PAGE 境界上。そして受け取るデータは PAGE
+         * 境界からの データ。（既存データ含む)
          *
-         *  HDFS の append は filesize 直後からの追記しか許さないので
-         *  iumfs から渡されたデータから、追記すべき分を算出し、
-         *  HDFS に要求する。
+         * PAGESIZE PAGESIZE |---------------------|---------------------|
+         * |<---------- filesize -------->| |<---- offset ------->|<-- size
+         * --->|
+         *
+         * HDFS の append は filesize 直後からの追記しか許さないので iumfs
+         * から渡されたデータから、追記すべき分を算出し、 HDFS に要求する。
          */
         if (offset + size < filesize) {
             // ファイルサイズ未満のデータ書き込み要求。すなわち変更。
@@ -102,17 +90,16 @@ public class HdfsFile extends IumfsFile {
         }
         FSDataOutputStream fsdos = fs.append(new Path(getPath()));
         /*
-         * ファイルの最後に/サイズのデータを書き込み用バッファに読み込む
-         * 現在はオフセットの指定はできず Append だけ。
+         * ファイルの最後に/サイズのデータを書き込み用バッファに読み込む 現在はオフセットの指定はできず Append だけ。
          */
         if (offset > filesize) {
             // オフセットがファイルサイズを超える要求。
             // まず、空白部分を null で埋める。
             fsdos.write(new byte[(int) (offset - filesize)]);
-            fsdos.write(buf, 0, (int)size);
+            fsdos.write(buf, 0, (int) size);
         } else {
             // オフセットがファイルサイズ未満の要求。
-            fsdos.write(buf, (int)(filesize - offset), (int)size);
+            fsdos.write(buf, (int) (filesize - offset), (int) size);
         }
         fsdos.close();
         /*
@@ -129,7 +116,7 @@ public class HdfsFile extends IumfsFile {
     public boolean mkdir() {
         try {
             /*
-             * Create new directory on  HDFS
+             * Create new directory on HDFS
              */
             if (fs.exists(new Path(getPath())) == true) {
                 logger.fine("cannot create directory");
@@ -140,12 +127,11 @@ public class HdfsFile extends IumfsFile {
                 logger.fine("cannot create directory");
                 return false;
             }
-            return true; 
+            return true;
         } catch (IOException ex) {
             /*
-             * can't throw IOException here.
-             * So return false, and iumfs.mkdir would back
-             * this 'false' to IOException...
+             * can't throw IOException here. So return false, and iumfs.mkdir
+             * would back this 'false' to IOException...
              */
             return false;
         }
@@ -166,10 +152,10 @@ public class HdfsFile extends IumfsFile {
     }
 
     /**
-     * List files under directory which expres this object.
-     * This corresponds readdir.
-     * 
-     * @return 
+     * List files under directory which expres this object. This corresponds
+     * readdir.
+     *
+     * @return
      */
     @Override
     public File[] listFiles() {
@@ -188,8 +174,8 @@ public class HdfsFile extends IumfsFile {
 
     @Override
     public long getFileType() {
-        try{
-            if(fs.getFileStatus(new Path(getPath())).isDir()){
+        try {
+            if (fs.getFileStatus(new Path(getPath())).isDir()) {
                 return IumfsFile.VDIR;
             } else {
                 return IumfsFile.VREG;
@@ -201,7 +187,7 @@ public class HdfsFile extends IumfsFile {
 
     @Override
     public long getPermission() {
-        if(isDirectory()){
+        if (isDirectory()) {
             return (long) 0040755; // directory
         } else {
             return (long) 0100444; // regular file      
@@ -218,8 +204,7 @@ public class HdfsFile extends IumfsFile {
     }
 
     /**
-     * <p>FileSystem.create を実行する</p>
-     * <p>creat(2) が呼ばれたということは既存ファイルがあった場合
+     * <p>FileSystem.create を実行する</p> <p>creat(2) が呼ばれたということは既存ファイルがあった場合
      * 既存データを削除(O_TRUNC相当)しなければならないが、 HDFS では データの途中
      * 変更はできないので、既存ファイルがあったらエラーリターンする</p>
      */
@@ -250,7 +235,7 @@ public class HdfsFile extends IumfsFile {
         }
     }
 
-    private FileSystem getFileSystem(String server) {
+    private FileSystem getFileSystem() {
         if (fs == null) {
             try {
                 Configuration conf = new Configuration();
@@ -281,5 +266,15 @@ public class HdfsFile extends IumfsFile {
      */
     public void setServer(String server) {
         this.server = server;
+    }
+
+    @Override
+    public boolean exists() {
+        try {
+            return getFileSystem().exists(new Path(getPath()));
+        } catch (IOException ex) {
+            ex.printStackTrace();
+            return false;
+        }
     }
 }

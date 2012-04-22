@@ -30,6 +30,12 @@ class HdfsGetAttrRequest extends GetAttrRequest {
 
     @Override
     public IumfsFile getFile() {
-        return HdfsFile.getFile(getServer(), getFullPath());
+        IumfsFile file = HdfsFile.getFile(getServer(), getFullPath());
+        
+        if(file.exists()){
+            return file;
+        } else {
+            return null;
+        }
     }
 }
