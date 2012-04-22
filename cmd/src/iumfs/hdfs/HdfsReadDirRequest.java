@@ -26,6 +26,6 @@ class HdfsReadDirRequest extends ReadDirRequest {
     
     @Override
     public IumfsFile getFile() {
-        return HdfsFile.getFile(getServer(), getPathname());
+        return HdfsFile.getFile(getServer(), getFullPath());
     }
 }

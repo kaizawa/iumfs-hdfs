@@ -27,7 +27,7 @@ public class HdfsWriteRequest extends WriteRequest {
    
     @Override
     public IumfsFile getFile() {
-        return HdfsFile.getFile(getServer(), getPathname());
+        return HdfsFile.getFile(getServer(), getFullPath());
     }      
 }
 

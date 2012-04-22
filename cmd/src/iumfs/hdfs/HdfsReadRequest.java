@@ -25,6 +25,6 @@ import iumfs.ReadRequest;
 public class HdfsReadRequest extends ReadRequest {    
     @Override
     public IumfsFile getFile() {
-        return HdfsFile.getFile(getServer(), getPathname());
+        return HdfsFile.getFile(getServer(), getFullPath());
     }       
 }

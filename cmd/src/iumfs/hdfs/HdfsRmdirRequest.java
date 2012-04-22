@@ -46,6 +46,6 @@ class HdfsRmdirRequest extends RmdirRequest {
     
     @Override
     public IumfsFile getFile() {
-        return HdfsFile.getFile(getServer(), getPathname());
+        return HdfsFile.getFile(getServer(), getFullPath());
     }       
 }
