@@ -15,26 +15,21 @@
  */
 package iumfs.hdfs;
 
+import iumfs.FileExistsException;
 import iumfs.IumfsFile;
 import iumfs.NotSupportedException;
+import iumfs.Request;
+import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.List;
 import java.util.logging.Logger;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.FSDataOutputStream;
-import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.*;
 import org.apache.hadoop.hdfs.protocol.AlreadyBeingCreatedException;
-import iumfs.FileExistsException;
-import iumfs.Request;
-import java.io.File;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.logging.Level;
-import org.apache.hadoop.fs.FSDataInputStream;
-import org.apache.hadoop.fs.FileStatus;
-import org.apache.hadoop.fs.Path;
 
 /**
  *
@@ -267,7 +262,7 @@ public class HdfsFile extends IumfsFile {
     public void setServer(String server) {
         this.server = server;
     }
-
+    
     @Override
     public boolean exists() {
         try {
@@ -276,5 +271,17 @@ public class HdfsFile extends IumfsFile {
             ex.printStackTrace();
             return false;
         }
+    }
+    
+    @Override
+    public long length(){
+        // ファイルの属性を得る
+        FileStatus fstat;
+        try {
+            fstat = fs.getFileStatus(new Path(getPath()));
+        } catch (IOException ex) {
+            return 0;
+        }
+        return fstat.getLen();
     }
 }
