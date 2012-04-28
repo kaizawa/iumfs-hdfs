@@ -24,6 +24,8 @@
   </target>
   <target name="compile">
     <javac srcdir="${src}" destdir="${build}" debug="true" debuglevel="lines,vars,source" classpathref="class.path" encoding="utf8">
+	<compilerarg value="-Xlint:unchecked" />
+	<compilerarg value="-Xlint:deprecation" />
     </javac>
   </target>
   <target name="test" depends="jar">
