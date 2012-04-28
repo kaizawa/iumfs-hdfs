@@ -39,7 +39,7 @@ base="/var/tmp/iumfsbase"
 CLASSPATH="\
 ./cmd/hdfsd.jar:${HADOOP_HOME}/conf:\
 ./cmd/lib/iumfs-daemon-core.jar:\
-${HADOOP_HOME}/hadoop-core-1.0.1.jar:\
+${HADOOP_HOME}/hadoop-core-1.0.2.jar:\
 ${HADOOP_HOME}/lib/commons-lang-2.4.jar:\
 ${HADOOP_HOME}/lib/commons-configuration-1.6.jar:\
 ${HADOOP_HOME}/lib/commons-logging-1.1.1.jar"
@@ -71,8 +71,8 @@ init (){
 }
 
 init_hdfs (){
-       if [ ! -f "${HADOOP_HOME}/hadoop-core-1.0.1.jar" ]; then
-           echo "Can't find hadoop-core-1.0.1.jar. HADOOP_HOME might not be set correctly."
+       if [ ! -f "${HADOOP_HOME}/hadoop-core-1.0.2.jar" ]; then
+           echo "Can't find hadoop-core-1.0.2.jar. HADOOP_HOME might not be set correctly."
            exit 1
        fi
         echo "##"
