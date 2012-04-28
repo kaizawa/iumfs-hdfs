@@ -38,7 +38,7 @@ mnt="/var/tmp/iumfsmnt"
 base="/var/tmp/iumfsbase"
 CLASSPATH="\
 ./cmd/hdfsd.jar:${HADOOP_HOME}/conf:\
-./cmd/lib/iumfs-daemon-core.jar:\
+./cmd/lib/iumfs-daemon-core-0.2.0jar:\
 ${HADOOP_HOME}/hadoop-core-1.0.2.jar:\
 ${HADOOP_HOME}/lib/commons-lang-2.4.jar:\
 ${HADOOP_HOME}/lib/commons-configuration-1.6.jar:\
