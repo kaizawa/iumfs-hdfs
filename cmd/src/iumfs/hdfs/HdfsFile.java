@@ -68,6 +68,7 @@ public class HdfsFile extends IumfsFile {
         // ファイルの属性を得る
         FileStatus fstat = fs.getFileStatus(new Path(getPath()));
         long filesize = fstat.getLen();
+        int written = 0;
 
         /*
          * この iumfscntl から受け取る write リクエストのオフセット値 は必ず PAGE 境界上。そして受け取るデータは PAGE
@@ -102,10 +103,11 @@ public class HdfsFile extends IumfsFile {
             }
 
         } finally {
+            written = fsdos.size();
             fsdos.close();
         }
         
-        return fsdos.size();
+        return written;
     }
 
     /*
