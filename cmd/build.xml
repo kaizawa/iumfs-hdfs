@@ -4,17 +4,13 @@
   <property name="src" value="./src"/>
   <property name="build" value="./build"/>
   <property name="dist" value="./"/>
-  <property environment="env"/>
-  <property name="hadoop.home" value="${env.HADOOP_HOME}" />
   <property name="lib" value="lib"/>
-  <path id="class.path">
-      <fileset dir="${hadoop.home}">
-         <include name="*.jar" />
-      </fileset>  
-      <fileset dir="${lib}">
-         <include name="*.jar" />
-      </fileset>
-  </path>
+
+   <path id="iumfs.path">
+       <fileset dir="${lib}">
+          <include name="*.jar" />
+       </fileset>
+   </path>
 
   <target name="jar" depends="compile">
     <jar manifest="manifest" jarfile="${dist}/hdfsd.jar" basedir="${build}" >
@@ -22,14 +18,20 @@
       <include name="**/log.properties"/>
     </jar>
   </target>
-  <target name="compile">
-    <javac srcdir="${src}" destdir="${build}" debug="true" debuglevel="lines,vars,source" classpathref="class.path" encoding="utf8">
+  <target name="compile" depends="classpath">
+    <javac srcdir="${src}" destdir="${build}" debug="true" debuglevel="lines,vars,source" 
+	classpath="${class.path}" encoding="utf8" classpathref="iumfs.path">
 	<compilerarg value="-Xlint:unchecked" />
 	<compilerarg value="-Xlint:deprecation" />
     </javac>
   </target>
   <target name="test" depends="jar">
     <exec dir="../hdfs-test" executable="./test.sh"/>
+  </target>
+  <target name="classpath">
+    <exec executable="hadoop" outputproperty="class.path">
+	<arg value="classpath"/>
+    </exec>
   </target>
 </project>
 
