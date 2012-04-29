@@ -67,8 +67,8 @@ init (){
 }
 
 init_hdfs (){
-       if [ ! -f "${HADOOP_HOME}/hadoop-core-1.0.2.jar" ]; then
-           echo "Can't find hadoop-core-1.0.2.jar. HADOOP_HOME might not be set correctly."
+       if [ ! -f "`which hadoop`" ]; then
+           echo "Can't find hadoop. PATH env variable may not be set correctly."
            exit 1
        fi
         echo "##"
