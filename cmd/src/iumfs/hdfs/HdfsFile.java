@@ -24,6 +24,7 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 import java.util.logging.Logger;
@@ -87,19 +88,23 @@ public class HdfsFile extends IumfsFile {
         /*
          * ファイルの最後に/サイズのデータを書き込み用バッファに読み込む 現在はオフセットの指定はできず Append だけ。
          */
-        if (offset > filesize) {
-            // オフセットがファイルサイズを超える要求。
-            // まず、空白部分を null で埋める。
-            fsdos.write(new byte[(int) (offset - filesize)]);
-            fsdos.write(buf, 0, (int) size);
-        } else {
-            // オフセットがファイルサイズ未満の要求。
-            fsdos.write(buf, (int) (filesize - offset), (int) size);
+        try {
+            if (offset > filesize) {
+                // オフセットがファイルサイズを超える要求。                                                                            
+                // まず、空白部分を null で埋める。                                                                                    
+
+                fsdos.write(new byte[(int) (offset - filesize)]);
+                fsdos.write(getDataByRange(buf, 0, size));
+            } else {
+                // オフセットがファイルサイズ未満の要求。                                                                              
+                logger.warning("offset=" + (int) (filesize - offset));
+                fsdos.write(getDataByRange(buf, filesize - offset, size));
+            }
+
+        } finally {
+            fsdos.close();
         }
-        fsdos.close();
-        /*
-         * レスポンスヘッダをセット
-         */
+        
         return fsdos.size();
     }
 
@@ -262,7 +267,7 @@ public class HdfsFile extends IumfsFile {
     public void setServer(String server) {
         this.server = server;
     }
-    
+
     @Override
     public boolean exists() {
         try {
@@ -272,9 +277,9 @@ public class HdfsFile extends IumfsFile {
             return false;
         }
     }
-    
+
     @Override
-    public long length(){
+    public long length() {
         // ファイルの属性を得る
         FileStatus fstat;
         try {
@@ -283,5 +288,10 @@ public class HdfsFile extends IumfsFile {
             return 0;
         }
         return fstat.getLen();
+    }
+
+    public byte[] getDataByRange(byte[] data, long from, long to) {
+        logger.finer("from=" + from + "to=" + to);
+        return Arrays.copyOfRange(data, (int) from, (int) to);
     }
 }
