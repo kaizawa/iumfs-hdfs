@@ -34,7 +34,7 @@ import org.apache.hadoop.hdfs.protocol.AlreadyBeingCreatedException;
 
 /**
  *
- * @author ka78231
+ * Class which represents files on HDFS
  */
 public class HdfsFile extends IumfsFile {
 
