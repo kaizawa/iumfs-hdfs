@@ -71,8 +71,8 @@ public class HdfsFile extends IumfsFile {
         int written = 0;
 
         /*
-         * この iumfscntl から受け取る write リクエストのオフセット値 は必ず PAGE 境界上。そして受け取るデータは PAGE
-         * 境界からの データ。（既存データ含む)
+         * この iumfscntl から受け取る write リクエストのオフセット値 は必ず PAGE 境界上。
+         * そして受け取るデータは PAGE 境界からの データ。（既存データ含む)
          *
          * PAGESIZE PAGESIZE |---------------------|---------------------|
          * |<---------- filesize -------->| |<---- offset ------->|<-- size
@@ -98,7 +98,6 @@ public class HdfsFile extends IumfsFile {
                 fsdos.write(getDataByRange(buf, 0, size));
             } else {
                 // オフセットがファイルサイズ未満の要求。                                                                              
-                logger.warning("offset=" + (int) (filesize - offset));
                 fsdos.write(getDataByRange(buf, filesize - offset, size));
             }
 
