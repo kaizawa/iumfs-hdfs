@@ -186,12 +186,15 @@ public class HdfsFile extends IumfsFile {
         }
     }
 
+    /*
+     * TODO: Implement SetAttribute to change file permission
+     */
     @Override
     public long getPermission() {
         if (isDirectory()) {
-            return (long) 0040755; // directory
+            return (long) 0040777; // directory
         } else {
-            return (long) 0100444; // regular file      
+            return (long) 0100777; // regular file      
         }
     }
 
