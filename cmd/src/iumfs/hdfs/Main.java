@@ -25,7 +25,7 @@ import java.util.logging.Logger;
  * 
  * Example)
  *   hadoop -cp "./cmd/hdfsd.jar:./cmd/lib/iumfs-daemon-core-0.2.0.jar:/usr/local/hadoop/conf:/usr/local/hadoop/hadoop-core-1.0.2.jar" iumfs.hdfs.Main
- * 
+ * * 
  * For debug
  * -Djava.util.logging.config.file=log.prop
  *
