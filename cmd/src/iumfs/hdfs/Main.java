@@ -21,19 +21,18 @@ import java.util.logging.Logger;
 /** 
  * User mode daemon for HDFS
  *
- * hadoop -cp ${HADOOP_HOME}/hdfsd.jar:${HADOOP_HOME}/conf:${HADOOP_HOME}/hadoop-0.20.2-core.jar:${HADOOP_HOME}/lib/commons-logging-1.0.4.jar hdfsd
+ * hadoop -cp $CLASSPATH" iumfs.hdfs.Main
  * 
- * デバッグ出力する場合
+ * Example)
+ *   hadoop -cp "./cmd/hdfsd.jar:./cmd/lib/iumfs-daemon-core-0.2.0.jar:/usr/local/hadoop/conf:/usr/local/hadoop/hadoop-core-1.0.2.jar" iumfs.hdfs.Main
+ * 
+ * For debug
  * -Djava.util.logging.config.file=log.prop
  *
- * 以下を CLASSPATH に含める必要がある。 
- * 
- * ${HADOOPHOME}/Ehadoop-xxx.core.jar
- * ${HADOOPHOME}/lib/commons-loggin-xxx.jar
- * ${HADOOPHOME}/conf  .... core-site.xml
+ * It would be easier to use an output of hadoop classpath command.
+ * It will output the list of libraries to be used.
  */
 public class Main {
-    static final String version = "0.1.1";  // version
     private static final Logger logger = Logger.getLogger(Main.class.getName());
     private static final int maxThreads = 4;
 
