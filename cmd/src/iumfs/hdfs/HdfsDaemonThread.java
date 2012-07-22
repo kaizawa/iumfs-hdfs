@@ -16,7 +16,8 @@
 package iumfs.hdfs;
 
 import iumfs.ControlDevicePollingThread;
-import iumfs.RequestFactory;
+import iumfs.IumfsFile;
+import iumfs.Request;
 
 /** 
  * Worker Thread which opens iumfscntl device and communicate with data node.
@@ -26,9 +27,16 @@ public class HdfsDaemonThread extends ControlDevicePollingThread {
     public HdfsDaemonThread(String name){
         super(name);
     }
-    
+
+    /**
+     * Create new IumfsFile instance for the request and set it to the request
+     * instance.
+     * 
+     * @param req 
+     */
     @Override
-    protected RequestFactory getFactory() {
-        return new HdfsRequestFactory();
+    protected void setFile(Request req) {
+        IumfsFile file = HdfsFile.getFile(req.getServer(), req.getFullPath());
+        req.setFile(file);
     }
 }            
