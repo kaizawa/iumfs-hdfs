@@ -15,7 +15,7 @@
  */
 package iumfs.hdfs;
 
-import iumfs.FileExistsException;
+import iumfs.FileExistException;
 import iumfs.IumfsFile;
 import iumfs.NotSupportedException;
 import iumfs.Request;
@@ -222,7 +222,7 @@ public class HdfsFile extends IumfsFile {
             //ファイルが存在したら EEXIST を返す
             if (fs.exists(path) == true) {
                 logger.fine("cannot create file");
-                throw new FileExistsException();
+                throw new FileExistException();
             }
 
             FSDataOutputStream fsdos = fs.create(path);
@@ -232,7 +232,7 @@ public class HdfsFile extends IumfsFile {
             fsdos.close();
         } catch (AlreadyBeingCreatedException ex) {
             logger.fine("AlreadyBeingCreatedException when writing");
-            throw new FileExistsException();
+            throw new FileExistException();
         } catch (IOException ex) {
             logger.fine("IOException happend when writing");
             throw ex;
